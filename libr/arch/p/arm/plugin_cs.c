@@ -1640,6 +1640,42 @@ static void arm64_esil_rev_vector(RAnalOp *op, csh *handle, cs_insn *insn, int v
 	}
 }
 
+// apply a per-lane unary op over each vas lane of src into dst
+static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op src = INSOP64 (1);
+	int lanes = vas_count (src.vas);
+	int lane_bits = vector_size (&src);
+	int i;
+	for (i = 0; i < lanes; i++) {
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		switch (insn->id) {
+		case ARM64_INS_CNT:
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",POPCNT,");
+			break;
+		case ARM64_INS_CLS:
+			// flip the lane when its sign bit is set, then count the leading
+			// zeros of the low lane_bits-1 bits (the sign bit itself excluded)
+			r_strbuf_appendf (&op->esil, "%d,%d,", lane_bits - 1, lane_bits - 1);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",>>,1,&,0,-,");
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",^,0x%" PFMT64x ",&,CLZ,",
+				bitmask_by_width[lane_bits - 2]);
+			break;
+		case ARM64_INS_CLZ:
+			r_strbuf_appendf (&op->esil, "%d,", lane_bits);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",CLZ,");
+			break;
+		}
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+	}
+}
+
 static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh *handle, cs_insn *insn) {
 	r_strbuf_init (&op->esil);
 	r_strbuf_set (&op->esil, "");
@@ -2143,6 +2179,42 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_BLR:
 		r_strbuf_setf (&op->esil, "pc,lr,:=,%s,pc,:=", REG64 (0));
 		break;
+	case ARM64_INS_CLS:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		int bits = 8 * REGSIZE64 (0);
+		if (is_vector_op (&src)) {
+			arm64_esil_vec_unary (op, handle, insn);
+		} else {
+			// count leading sign bits: flip negative values, then count the
+			// leading zeros of the low bits-1 bits (the sign bit itself is
+			// excluded); same trick as the CLS case
+			r_strbuf_setf (&op->esil, "%d,%d,%s,>>,1,&,0,-,%s,^,0x%" PFMT64x ",&,CLZ,%s,=",
+				bits - 1, bits - 1, REG64 (1), REG64 (1), bitmask_by_width[bits - 2], REG64 (0));
+		}
+		break;
+	}
+	case ARM64_INS_CLZ:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			arm64_esil_vec_unary (op, handle, insn);
+		} else {
+			r_strbuf_setf (&op->esil, "%d,%s,CLZ,%s,=",
+				8 * REGSIZE64 (0), REG64 (1), REG64 (0));
+		}
+		break;
+	}
+	case ARM64_INS_CNT:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		// scalar cnt is a base A64 instruction gated by FEAT_CSSC, which the
+		// bundled capstone does not decode, so only the vector form lands here
+		if (is_vector_op (&src)) {
+			arm64_esil_vec_unary (op, handle, insn);
+		}
+		break;
+	}
 	case ARM64_INS_LDRH:
 	case ARM64_INS_LDUR:
 	case ARM64_INS_LDURB:
@@ -4173,6 +4245,9 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		op->type = R_ANAL_OP_TYPE_SYNC; // or cache
 		break;
 	//  XXX unimplemented instructions
+	case ARM64_INS_CLZ:
+	case ARM64_INS_CLS:
+	case ARM64_INS_CNT:
 	case ARM64_INS_DUP:
 	case ARM64_INS_XTN:
 	case ARM64_INS_XTN2:
