@@ -1582,6 +1582,64 @@ static const char *arm64_esil_cond_alt(int id) {
 	}
 }
 
+// byte-reversal granularity for arm64_esil_rev_dword/arm64_esil_rev_vector
+#define REV_GRAN_64 0
+#define REV_GRAN_32 1
+#define REV_GRAN_16 2
+
+// reverse bytes of the 64-bit chunk src into dst, per whole chunk, word or halfword;
+// the tmp staging lets src and dst alias (e.g. rev x0, x0)
+static void arm64_esil_rev_dword(RStrBuf *sb, const char *src, const char *dst, int variant) {
+	switch (variant) {
+	case REV_GRAN_16:
+		// REV16: swap bytes within each 16-bit halfword
+		r_strbuf_appendf (sb,
+			"8,0xff00ff00ff00ff00,%s,&,>>,tmp,=,"
+			"8,0x00ff00ff00ff00ff,%s,&,<<,tmp,|=,tmp,%s,=",
+			src, src, dst);
+		break;
+	case REV_GRAN_32:
+		// REV32: reverse bytes within each 32-bit word
+		r_strbuf_appendf (sb,
+			"24,0x000000ff000000ff,%s,&,<<,tmp,=,"
+			"16,0x000000ff000000ff,8,%s,>>,&,<<,tmp,|=,"
+			"8,0x000000ff000000ff,16,%s,>>,&,<<,tmp,|=,"
+			"0x000000ff000000ff,24,%s,>>,&,tmp,|=,tmp,%s,=",
+			src, src, src, src, dst);
+		break;
+	default:
+		// REV64: reverse bytes across the whole chunk
+		r_strbuf_appendf (sb,
+			"56,0xff,%s,&,<<,tmp,=,"
+			"48,0xff,8,%s,>>,&,<<,tmp,|=,"
+			"40,0xff,16,%s,>>,&,<<,tmp,|=,"
+			"32,0xff,24,%s,>>,&,<<,tmp,|=,"
+			"24,0xff,32,%s,>>,&,<<,tmp,|=,"
+			"16,0xff,40,%s,>>,&,<<,tmp,|=,"
+			"8,0xff,48,%s,>>,&,<<,tmp,|=,"
+			"0xff,56,%s,>>,&,tmp,|=,tmp,%s,=",
+			src, src, src, src, src, src, src, src, dst);
+		break;
+	}
+}
+
+// vector REV* act per container; a D-register destination zeroes the upper half
+static void arm64_esil_rev_vector(RAnalOp *op, csh *handle, cs_insn *insn, int variant) {
+	cs_arm64_op src = INSOP64 (1);
+	const int halves = (vas_count (src.vas) * vector_size (&src) == 128)? 2: 1;
+	const char *suffix[2] = { "l", "h" };
+	int i;
+	for (i = 0; i < halves; i++) {
+		char src_name[24], dst_name[24];
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		snprintf (src_name, sizeof (src_name), "%s%s", REG64 (1), suffix[i]);
+		snprintf (dst_name, sizeof (dst_name), "%s%s", REG64 (0), suffix[i]);
+		arm64_esil_rev_dword (&op->esil, src_name, dst_name, variant);
+	}
+}
+
 static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh *handle, cs_insn *insn) {
 	r_strbuf_init (&op->esil);
 	r_strbuf_set (&op->esil, "");
@@ -1594,48 +1652,49 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		break;
 	case ARM64_INS_REV:
 	case ARM64_INS_REV64:
-	// these REV* instructions were almost right, except in the cases like rev x0, x0
-	// where the use of |= caused copies of the value to be erroneously present
 	{
-		const char *r0 = REG64 (0);
-		const char *r1 = REG64 (1);
-		int size = REGSIZE64 (1);
-		if (size == 8) {
-			r_strbuf_setf (&op->esil,
-				"56,0xff,%s,&,<<,tmp,=,"
-				"48,0xff,8,%s,>>,&,<<,tmp,|=,"
-				"40,0xff,16,%s,>>,&,<<,tmp,|=,"
-				"32,0xff,24,%s,>>,&,<<,tmp,|=,"
-				"24,0xff,32,%s,>>,&,<<,tmp,|=,"
-				"16,0xff,40,%s,>>,&,<<,tmp,|=,"
-				"8,0xff,48,%s,>>,&,<<,tmp,|=,"
-				"0xff,56,%s,>>,&,tmp,|=,tmp,%s,=",
-				r1, r1, r1, r1,
-				r1, r1, r1, r1, r0);
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			arm64_esil_rev_vector (op, handle, insn, REV_GRAN_64);
+		} else if (REGSIZE64 (1) == 8) {
+			arm64_esil_rev_dword (&op->esil, REG64 (1), REG64 (0), REV_GRAN_64);
 		} else {
+			// REV Wd, Wn reverses the whole word
 			r_strbuf_setf (&op->esil,
 				"24,0xff,%s,&,<<,tmp,=,"
 				"16,0xff,8,%s,>>,&,<<,tmp,|=,"
 				"8,0xff,16,%s,>>,&,<<,tmp,|=,"
 				"0xff,24,%s,>>,&,tmp,|=,tmp,%s,=",
-				r1, r1, r1, r1, r0);
+				REG64 (1), REG64 (1), REG64 (1), REG64 (1), REG64 (0));
 		}
 		break;
 	}
 	case ARM64_INS_REV32:
-		r_strbuf_setf (&op->esil,
-			"24,0x000000ff000000ff,%s,&,<<,tmp,=,"
-			"16,0x000000ff000000ff,8,%s,>>,&,<<,tmp,|=,"
-			"8,0x000000ff000000ff,16,%s,>>,&,<<,tmp,|=,"
-			"0x000000ff000000ff,24,%s,>>,&,tmp,|=,tmp,%s,=",
-			REG64 (1), REG64 (1), REG64 (1), REG64 (1), REG64 (0));
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			arm64_esil_rev_vector (op, handle, insn, REV_GRAN_32);
+		} else {
+			arm64_esil_rev_dword (&op->esil, REG64 (1), REG64 (0), REV_GRAN_32);
+		}
 		break;
+	}
 	case ARM64_INS_REV16:
-		r_strbuf_setf (&op->esil,
-			"8,0xff00ff00ff00ff00,%s,&,>>,tmp,=,"
-			"8,0x00ff00ff00ff00ff,%s,&,<<,tmp,|=,tmp,%s,=",
-			REG64 (1), REG64 (1), REG64 (0));
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			arm64_esil_rev_vector (op, handle, insn, REV_GRAN_16);
+		} else if (REGSIZE64 (1) == 8) {
+			arm64_esil_rev_dword (&op->esil, REG64 (1), REG64 (0), REV_GRAN_16);
+		} else {
+			// REV16 Wd, Wn swaps bytes within each 16-bit halfword of the word
+			r_strbuf_setf (&op->esil,
+				"8,0xff00ff00,%s,&,>>,tmp,=,"
+				"8,0x00ff00ff,%s,&,<<,tmp,|=,tmp,%s,=",
+				REG64 (1), REG64 (1), REG64 (0));
+		}
 		break;
+	}
 	case ARM64_INS_ADR:
 		// TODO: must be 21bit signed
 		r_strbuf_setf (&op->esil,
@@ -2083,10 +2142,6 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 #endif
 	case ARM64_INS_BLR:
 		r_strbuf_setf (&op->esil, "pc,lr,:=,%s,pc,:=", REG64 (0));
-		break;
-	case ARM64_INS_CLZ:
-		r_strbuf_setf (&op->esil, "%d,%s,CLZ,%s,=",
-			8 * REGSIZE64 (0), REG64 (1), REG64 (0));
 		break;
 	case ARM64_INS_LDRH:
 	case ARM64_INS_LDUR:
@@ -4121,7 +4176,10 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_DUP:
 	case ARM64_INS_XTN:
 	case ARM64_INS_XTN2:
+	case ARM64_INS_REV:
 	case ARM64_INS_REV64:
+	case ARM64_INS_REV16:
+	case ARM64_INS_REV32:
 	case ARM64_INS_EXT:
 	case ARM64_INS_INS:
 		op->type = R_ANAL_OP_TYPE_MOV;
