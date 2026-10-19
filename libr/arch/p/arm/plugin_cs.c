@@ -1670,6 +1670,26 @@ static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn) {
 			VECARG64_APPEND (&op->esil, 1, i, 0);
 			r_strbuf_append (&op->esil, ",CLZ,");
 			break;
+		case ARM64_INS_RBIT:
+		{
+			// xor-shift conditional bit swaps, one stage per bit position;
+			// the running lane value lives in tmp so every subexpression
+			// stays within 64 bits
+			static const ut64 swap_masks[] = {
+				0x5555555555555555ULL, 0x3333333333333333ULL, 0x0F0F0F0F0F0F0F0FULL,
+				0x00FF00FF00FF00FFULL, 0x0000FFFF0000FFFFULL, 0x00000000FFFFFFFFULL
+			};
+			int s;
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",tmp,=");
+			for (s = 0; (1 << s) < lane_bits; s++) {
+				r_strbuf_appendf (&op->esil,
+					",%d,tmp,>>,tmp,^,0x%" PFMT64x ",&,DUP,%d,SWAP,<<,tmp,^,^,tmp,=",
+					1 << s, swap_masks[s], 1 << s);
+			}
+			r_strbuf_append (&op->esil, ",tmp,");
+			break;
+		}
 		}
 		VEC64_DST_APPEND (&op->esil, 0, i);
 		r_strbuf_append (&op->esil, ",=");
@@ -2723,10 +2743,17 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 			IMM64 (3), REG64 (2), (int)(REGBITS64 (1) - IMM64 (3)), REG64 (1), REG64 (0));
 		break;
 	case ARM64_INS_RBIT:
-		// slightly shorter expression to reverse bits
-		r_strbuf_setf (&op->esil, "0,tmp,=,0,DUP,DUP,DUP,%d,-,%s,>>,1,&,<<,tmp,+=,%d,-,?{,++,4,GOTO,},tmp,%s,=",
-			REGBITS64 (1)-1, REG64 (1), REGBITS64 (1)-1, REG64 (0));
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			arm64_esil_vec_unary (op, handle, insn);
+		} else {
+			// slightly shorter expression to reverse bits
+			r_strbuf_setf (&op->esil, "0,tmp,=,0,DUP,DUP,DUP,%d,-,%s,>>,1,&,<<,tmp,+=,%d,-,?{,++,4,GOTO,},tmp,%s,=",
+				REGBITS64 (1)-1, REG64 (1), REGBITS64 (1)-1, REG64 (0));
+		}
 		break;
+	}
 	case ARM64_INS_MVN:
 	case ARM64_INS_MOVN:
 	{

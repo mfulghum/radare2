@@ -3493,3 +3493,41 @@ EXPECT=<<EOF
 0x3333333344444444
 EOF
 RUN
+
+NAME=arm64 ESIL vector rbit reverses each byte lane
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2058606e # rbit v0.16b, v1.16b
+aei
+aeip
+aer v1l=0x0f00fff001800201
+aer v1h=0xdeadbeefcafef00d
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xf000ff0f80014080
+0x7bb57df7537f0fb0
+EOF
+RUN
+
+NAME=arm64 ESIL vector rbit D-form zeroes upper half
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2058602e # rbit v0.8b, v1.8b
+aei
+aeip
+aer v1l=0x01028081ff008001
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x80400181ff000180
+0x00000000
+EOF
+RUN
