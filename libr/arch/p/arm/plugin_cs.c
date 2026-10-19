@@ -1834,6 +1834,26 @@ static void arm64_esil_vec_shift(RAnalOp *op, csh *handle, cs_insn *insn, int am
 			VECARG64_APPEND (&op->esil, 1, i, 0);
 			r_strbuf_appendf (&op->esil, ",<<,0x%" PFMT64x ",&,^,|,", (ut64)mask);
 			break;
+		case ARM64_INS_SLI:
+			// keep the low amount bits of the destination lane
+			r_strbuf_appendf (&op->esil, "0x%" PFMT64x ",",
+				(ut64)(amount? bitmask_by_width[amount - 1]: 0));
+			VECARG64_APPEND (&op->esil, 0, i, 0);
+			r_strbuf_appendf (&op->esil, ",&,%d,", amount);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",<<,0x%" PFMT64x ",&,|,", (ut64)mask);
+			break;
+		case ARM64_INS_SRI:
+		{
+			// keep the high amount bits of the destination lane
+			ut64 low = amount < lane_bits? (ut64)bitmask_by_width[lane_bits - amount - 1]: 0;
+			r_strbuf_appendf (&op->esil, "0x%" PFMT64x ",", mask ^ low);
+			VECARG64_APPEND (&op->esil, 0, i, 0);
+			r_strbuf_appendf (&op->esil, ",&,%d,", amount);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",>>,0x%" PFMT64x ",&,|,", low);
+			break;
+		}
 		}
 		VEC64_DST_APPEND (&op->esil, 0, i);
 		r_strbuf_append (&op->esil, ",=");
@@ -2941,6 +2961,8 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_SSHR:
 	case ARM64_INS_USHR:
 	case ARM64_INS_SQSHLU:
+	case ARM64_INS_SLI:
+	case ARM64_INS_SRI:
 	{
 		cs_arm64_op src = INSOP64 (1);
 		if (is_vector_op (&src) && is_vector_op (&INSOP64 (0)) && ISIMM64 (2)) {

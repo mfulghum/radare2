@@ -3983,3 +3983,44 @@ EXPECT=<<EOF
 0x00000000
 EOF
 RUN
+
+NAME=arm64 ESIL vector SLI inserts lane bits keeping low dst bits
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2054146f # sli v0.8h, v1.8h, #4
+aei
+aeip
+aer v1l=0x0001123400ffffff
+aer v0l=0xf00f000fabcd1234
+aer v0h=0xdeadbeefcafef00d
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x1f234f0ffdfff4
+0xd000f000e000d
+EOF
+RUN
+
+NAME=arm64 ESIL vector SRI inserts lane bits keeping high dst bits
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2044386f # sri v0.4s, v1.4s, #8
+aei
+aeip
+aer v1l=0xffffffffdeadbeef
+aer v1h=0x1234567800000000
+aer v0l=0xabcd000012345678
+aer v0h=0xaabbccddeeff0011
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xabffffff12deadbe
+0xaa123456ee000000
+EOF
+RUN
