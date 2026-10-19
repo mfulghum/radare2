@@ -1800,55 +1800,127 @@ static void arm64_esil_vec_fcvtnl(RAnalOp *op, csh *handle, cs_insn *insn) {
 // ISA takes SInt(op2_lane[7:0]) so only the low 8 bits of the lane matter
 static void arm64_esil_vec_shift_reg(RAnalOp *op, csh *handle, cs_insn *insn) {
 	cs_arm64_op src = INSOP64 (1);
-	int lanes = vas_count (src.vas);
-	int lane_bits = vector_size (&src);
-	bool unsrc = insn->id == ARM64_INS_USHL || insn->id == ARM64_INS_URSHL;
-	bool rounded = insn->id == ARM64_INS_SRSHL || insn->id == ARM64_INS_URSHL;
-	int up = 64 - lane_bits;
-	int i;
+	int lanes = vas_count (src.vas), lane_bits = vector_size (&src);
+	ut64 mask = bitmask_by_width[lane_bits - 1];
+	bool unsrc = false, rounded = false, sat = false;
+	int up, i;
+	switch (insn->id) {
+	case ARM64_INS_SSHL:
+		break;
+	case ARM64_INS_USHL:
+		unsrc = true;
+		break;
+	case ARM64_INS_SRSHL:
+		rounded = true;
+		break;
+	case ARM64_INS_URSHL:
+		unsrc = true;
+		rounded = true;
+		break;
+	case ARM64_INS_SQSHL:
+		sat = true;
+		break;
+	case ARM64_INS_UQSHL:
+		unsrc = true;
+		sat = true;
+		break;
+	case ARM64_INS_SQRSHL:
+		sat = true;
+		rounded = true;
+		break;
+	case ARM64_INS_UQRSHL:
+		unsrc = true;
+		sat = true;
+		rounded = true;
+		break;
+	default:
+		break;
+	}
+	up = 64 - lane_bits;
 	for (i = 0; i < lanes; i++) {
+		RStrBuf value_lane, shift_lane, shift_expr, sextended, sat_limit, pos_probe, neg_probe, left_shift, right_shift;
+		const char *val, *shift, *scount, *sext, *right, *left;
+		ut64 signbit, maxs;
 		if (i > 0) {
 			COMMA (&op->esil);
 		}
-		RStrBuf vs, ss, svb, xb, rb;
-		r_strbuf_init (&vs);
-		r_strbuf_init (&ss);
-		r_strbuf_init (&svb);
-		r_strbuf_init (&xb);
-		r_strbuf_init (&rb);
-		VECARG64_APPEND (&vs, 1, i, 0);
-		VECARG64_APPEND (&ss, 2, i, 0);
-		const char *v = r_strbuf_get (&vs);
-		const char *s = r_strbuf_get (&ss);
+		r_strbuf_init (&value_lane);
+		r_strbuf_init (&shift_lane);
+		r_strbuf_init (&shift_expr);
+		r_strbuf_init (&sextended);
+		r_strbuf_init (&sat_limit);
+		r_strbuf_init (&pos_probe);
+		r_strbuf_init (&neg_probe);
+		r_strbuf_init (&left_shift);
+		r_strbuf_init (&right_shift);
+		VECARG64_APPEND (&value_lane, 1, i, 0);
+		VECARG64_APPEND (&shift_lane, 2, i, 0);
+		val = r_strbuf_get (&value_lane);
+		shift = r_strbuf_get (&shift_lane);
 		// signed shift count from the low 8 bits of the shift lane
-		r_strbuf_appendf (&svb, "0xff,%s,&,56,SWAP,<<,56,SWAP,ASR", s);
-		const char *sv = r_strbuf_get (&svb);
-		// right by -sv: sign fill unless the source is unsigned; when
-		// rounding, RShr's half unit becomes (v ASR n) + ((v ASR (n-1)) & 1)
+		r_strbuf_appendf (&shift_expr, "0xff,%s,&,56,SWAP,<<,56,SWAP,ASR", shift);
+		scount = r_strbuf_get (&shift_expr);
+		// sign-extended source lane (identity for the unsigned source forms)
+		r_strbuf_appendf (&sextended, "%d,%d,%s,<<,ASR", up, up, val);
+		sext = r_strbuf_get (&sextended);
+		// right by -scount: sign fill unless the source is unsigned; when
+		// rounding, RShr's half unit becomes (val ASR n) + ((val ASR (n-1)) & 1)
 		if (unsrc) {
 			if (rounded) {
-				r_strbuf_appendf (&rb, "%s,0,-,%s,>>,1,%s,0,-,-,%s,>>,1,&,+",
-					sv, v, sv, v);
+				r_strbuf_appendf (&right_shift, "%s,0,-,%s,>>,1,%s,0,-,-,%s,>>,1,&,+",
+					scount, val, scount, val);
 			} else {
-				r_strbuf_appendf (&rb, "%s,0,-,%s,>>", sv, v);
+				r_strbuf_appendf (&right_shift, "%s,0,-,%s,>>", scount, val);
 			}
 		} else if (rounded) {
-			r_strbuf_appendf (&rb,
+			r_strbuf_appendf (&right_shift,
 				"%s,0,-,%d,%d,%s,<<,ASR,ASR,1,%s,0,-,-,%d,%d,%s,<<,ASR,ASR,1,&,+",
-				sv, up, up, v, sv, up, up, v);
+				scount, up, up, val, scount, up, up, val);
 		} else {
-			r_strbuf_appendf (&rb, "%s,0,-,%d,%d,%s,<<,ASR,ASR", sv, up, up, v);
+			r_strbuf_appendf (&right_shift, "%s,0,-,%d,%d,%s,<<,ASR,ASR", scount, up, up, val);
 		}
-		const char *right = r_strbuf_get (&rb);
-		// sv >= 0 selects the plain left shift (sv == 0 must not round);
-		// the lane mask comes from the destination append below
-		r_strbuf_appendf (&op->esil, "0,%s,<,!,?{,%s,%s,<<,}{,%s,},", sv, sv, v, right);
+		right = r_strbuf_get (&right_shift);
+		// left by scount: plain, or saturating where the unsigned lanes go all
+		// ones and the signed lanes go to the signed max/min via the P,N
+		// probes (val > max >> scount and -val > max >> scount); the unsigned probe
+		// flips the sign bit so the VM'shift signed compare orders it correctly
+		signbit = 1ULL << 63;
+		maxs = bitmask_by_width[lane_bits - 2];
+		if (!sat) {
+			r_strbuf_appendf (&left_shift, "%s,%s,<<", scount, val);
+		} else if (unsrc) {
+			r_strbuf_appendf (&left_shift,
+				"%s,0x%" PFMT64x ",>>,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,>,"
+				"0x%" PFMT64x ",*,%s,%s,<<,|",
+				scount, (ut64)mask, signbit, val, signbit, (ut64)mask, scount, val);
+		} else {
+			const char *limit, *pos_over, *neg_over;
+			r_strbuf_appendf (&sat_limit, "%s,0x%" PFMT64x ",>>", scount, (ut64)maxs);
+			limit = r_strbuf_get (&sat_limit);
+			r_strbuf_appendf (&pos_probe, "%s,%s,>", limit, sext);
+			pos_over = r_strbuf_get (&pos_probe);
+			r_strbuf_appendf (&neg_probe, "%s,%s,0,-,>", limit, sext);
+			neg_over = r_strbuf_get (&neg_probe);
+			r_strbuf_appendf (&left_shift,
+				"%s,%s,+,0x%" PFMT64x ",*,%s,0x%" PFMT64x ",*,%s,0x%" PFMT64x ",*,+,&,"
+				"%s,%s,+,0x%" PFMT64x ",*,0xffffffffffffffff,^,%s,%s,<<,&,|",
+				pos_over, neg_over, (ut64)mask, pos_over, (ut64)maxs,
+				neg_over, (ut64)(~maxs & mask), pos_over, neg_over, (ut64)mask, scount, val);
+		}
+		left = r_strbuf_get (&left_shift);
+		// scount >= 0 selects the left branch (scount == 0 must not round)
+		r_strbuf_appendf (&op->esil, "0,%s,<,!,?{,%s,}{,%s,},", scount, left, right);
 		VEC64_DST_APPEND (&op->esil, 0, i);
 		r_strbuf_append (&op->esil, ",=");
-		r_strbuf_fini (&vs);
-		r_strbuf_fini (&ss);
-		r_strbuf_fini (&svb);
-		r_strbuf_fini (&rb);
+		r_strbuf_fini (&value_lane);
+		r_strbuf_fini (&shift_lane);
+		r_strbuf_fini (&shift_expr);
+		r_strbuf_fini (&sextended);
+		r_strbuf_fini (&sat_limit);
+		r_strbuf_fini (&pos_probe);
+		r_strbuf_fini (&neg_probe);
+		r_strbuf_fini (&left_shift);
+		r_strbuf_fini (&right_shift);
 	}
 }
 
@@ -3031,6 +3103,10 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_USHL:
 	case ARM64_INS_SRSHL:
 	case ARM64_INS_URSHL:
+	case ARM64_INS_SQSHL:
+	case ARM64_INS_UQSHL:
+	case ARM64_INS_SQRSHL:
+	case ARM64_INS_UQRSHL:
 	{
 		cs_arm64_op src = INSOP64 (1);
 		if (is_vector_op (&src) && is_vector_op (&INSOP64 (0))

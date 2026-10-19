@@ -4146,3 +4146,167 @@ EXPECT=<<EOF
 0x00000000
 EOF
 RUN
+
+NAME=arm64 ESIL vector SQSHL saturates left shifts to the signed lane range
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 204c620e # sqshl v0.4h, v1.4h, v2.4h
+aei
+aeip
+aer v1l=0x8000ffff20000100
+aer v2l=0x0001000100020006
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x8000fffe7fff4000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQSHL keeps in-range lanes at the saturation boundary
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 204c620e # sqshl v0.4h, v1.4h, v2.4h
+aei
+aeip
+aer v1l=0xf000f0010fff1000
+aer v2l=0x0003000300030003
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x800080087ff87fff
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQSHL saturates 64-bit lanes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 204ce24e # sqshl v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=1
+aer v2l=0x40
+aer v1h=0xffffffffffffffff
+aer v2h=0x40
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x7fffffffffffffff
+0x8000000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector UQSHL saturates overflowing 64-bit lanes to all ones
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 204ce26e # uqshl v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x8000000000000000
+aer v2l=1
+aer v1h=0x7fffffffffffffff
+aer v2h=1
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffffffffffff
+0xfffffffffffffffe
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQRSHL rounds right shifts without saturating them
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 205ca20e # sqrshl v0.2s, v1.2s, v2.2s
+aei
+aeip
+aer v1l=0xfffffff900000003
+aer v2l=0x00000003000000fe
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffc800000001
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQRSHL saturates signed 64-bit left shifts
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 205ce24e # sqrshl v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x4000000000000000
+aer v2l=2
+aer v1h=0xc000000000000000
+aer v2h=2
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x7fffffffffffffff
+0x8000000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector UQRSHL rounds and saturates halfword lanes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 205c622e # uqrshl v0.4h, v1.4h, v2.4h
+aei
+aeip
+aer v1l=0x7fff8000ffff0001
+aer v2l=0x00010001000100ff
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xfffeffffffff0001
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector UQRSHL rounds full-width lanes with saturation
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 205ce26e # uqrshl v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0xffffffffffffffff
+aer v2l=0xffffffffffffffc1
+aer v1h=0x7fffffffffffffff
+aer v2h=0xff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00000002
+0x4000000000000000
+EOF
+RUN
