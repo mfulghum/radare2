@@ -1758,6 +1758,85 @@ static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn, int sc
 	}
 }
 
+// zero-compare forms: every lane becomes all-ones or all-zeros by the
+// predicate against zero; fp16 lanes are left unemulated by the caller
+static void arm64_esil_vec_cmpzero(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op src = INSOP64 (1);
+	// scalar simd&fp forms act on the s/d register view with one lane
+	bool vector = is_vector_op (&src);
+	int lanes = vector? vas_count (src.vas): 1;
+	int esize = vector? vector_size (&src): REGSIZE64 (1) * 8;
+	int up = 64 - esize;
+	int i;
+	for (i = 0; i < lanes; i++) {
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		switch (insn->id) {
+		case ARM64_INS_FCMGT:
+		case ARM64_INS_FCMGE:
+			// 0 < v and 0 <= v with the VM's NaN-quiet FP compares
+			r_strbuf_appendf (&op->esil, "%d,", esize);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",F2D,0,I2D,");
+			r_strbuf_append (&op->esil,
+				insn->id == ARM64_INS_FCMGT? "F<,": "F<=,");
+			break;
+		case ARM64_INS_FCMLT:
+		case ARM64_INS_FCMLE:
+			// SWAP brings the value to the top so it becomes the first
+			// operand of the compare against 0
+			r_strbuf_appendf (&op->esil, "%d,", esize);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",F2D,0,I2D,SWAP,");
+			r_strbuf_append (&op->esil,
+				insn->id == ARM64_INS_FCMLT? "F<,": "F<=,");
+			break;
+		case ARM64_INS_FCMEQ:
+			r_strbuf_appendf (&op->esil, "%d,", esize);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",F2D,0,I2D,F==,");
+			break;
+		case ARM64_INS_CMEQ:
+			// ! (esil_neg) is the equality predicate against zero
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",!,");
+			break;
+		case ARM64_INS_CMGT:
+			r_strbuf_append (&op->esil, "0,");
+			r_strbuf_appendf (&op->esil, "%d,%d,", up, up);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",<<,ASR,>,");
+			break;
+		case ARM64_INS_CMGE:
+			r_strbuf_append (&op->esil, "0,");
+			r_strbuf_appendf (&op->esil, "%d,%d,", up, up);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",<<,ASR,<,!,");
+			break;
+		case ARM64_INS_CMLE:
+			r_strbuf_append (&op->esil, "0,");
+			r_strbuf_appendf (&op->esil, "%d,%d,", up, up);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",<<,ASR,>,!,");
+			break;
+		case ARM64_INS_CMLT:
+			r_strbuf_append (&op->esil, "0,");
+			r_strbuf_appendf (&op->esil, "%d,%d,", up, up);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",<<,ASR,<,");
+			break;
+		default:
+			break;
+		}
+		// negate the 0/1 predicate so true lanes become the all-ones mask;
+		// the dst append then truncates it to the lane width
+		r_strbuf_append (&op->esil, "0,-,");
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+	}
+}
+
 // narrowing/widening fp lane pairs for fcvtn/fcvtn2/fcvtl/fcvtl2
 static void arm64_esil_vec_fcvtnl(RAnalOp *op, csh *handle, cs_insn *insn) {
 	bool upper = false, narrow = false;
@@ -2518,6 +2597,31 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_FCVTL2:
 		arm64_esil_vec_fcvtnl (op, handle, insn);
 		break;
+	case ARM64_INS_CMEQ:
+	case ARM64_INS_CMGE:
+	case ARM64_INS_CMGT:
+	case ARM64_INS_CMLE:
+	case ARM64_INS_CMLT:
+		// zero forms only; the register forms compare two vectors
+		if (insn->detail->arm64.op_count > 2 && is_vector_op (&INSOP64 (0))
+			&& is_vector_op (&INSOP64 (1)) && ISIMM64 (2) && !IMM64 (2)) {
+			arm64_esil_vec_cmpzero (op, handle, insn);
+		}
+		break;
+	case ARM64_INS_FCMEQ:
+	case ARM64_INS_FCMGE:
+	case ARM64_INS_FCMGT:
+	case ARM64_INS_FCMLE:
+	case ARM64_INS_FCMLT:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		int esize = is_vector_op (&src)? vector_size (&src): REGSIZE64 (1) * 8;
+		if (insn->detail->arm64.op_count > 2 && ISREG64 (0) && ISREG64 (1)
+			&& ISIMM64 (2) && !IMM64 (2) && (esize == 32 || esize == 64)) {
+			arm64_esil_vec_cmpzero (op, handle, insn);
+		}
+		break;
+	}
 	case ARM64_INS_FCVT:
 		r_strbuf_setf (&op->esil, "%d,%d,%s,F2D,D2F,%s,=",
 			REGBITS64 (0), REGBITS64 (1), REG64 (1), REG64 (0));
@@ -4895,6 +4999,18 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_SQRSHRUN:
 	case ARM64_INS_SQRSHRUN2:
 		op->type = R_ANAL_OP_TYPE_SHR;
+		break;
+	case ARM64_INS_CMEQ:
+	case ARM64_INS_CMGE:
+	case ARM64_INS_CMGT:
+	case ARM64_INS_CMLE:
+	case ARM64_INS_CMLT:
+	case ARM64_INS_FCMEQ:
+	case ARM64_INS_FCMGE:
+	case ARM64_INS_FCMGT:
+	case ARM64_INS_FCMLE:
+	case ARM64_INS_FCMLT:
+		op->type = R_ANAL_OP_TYPE_CMP;
 		break;
 	case ARM64_INS_ASR:
 		op->cycles = 1;

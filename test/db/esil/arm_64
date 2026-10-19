@@ -4705,3 +4705,231 @@ EXPECT=<<EOF
 0x00000000
 EOF
 RUN
+
+NAME=arm64 ESIL vector CMEQ marks lanes equal to zero
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2098a04e # cmeq v0.4s, v1.4s, #0
+aei
+aeip
+aer v1l=0x0000000100000000
+aer v1h=0x00000000ffffffff
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffff
+0xffffffff00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector CMGE fills lanes that are not negative
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2088606e # cmge v0.8h, v1.8h, #0
+aei
+aeip
+aer v1l=0x7fff8000ffff0000
+aer v1h=0x80000000ffff0001
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffff00000000ffff
+0xffff0000ffff
+EOF
+RUN
+
+NAME=arm64 ESIL vector CMGT fills positive signed lanes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2088a04e # cmgt v0.4s, v1.4s, #0
+aei
+aeip
+aer v1l=0xffffffff00000000
+aer v1h=0x7fffffff00000001
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00000000
+0xffffffffffffffff
+EOF
+RUN
+
+NAME=arm64 ESIL vector CMLE keeps the D form upper half zeroed
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2098602e # cmle v0.4h, v1.4h, #0
+aei
+aeip
+aer v1l=0xffff7fff00008000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffff0000ffffffff
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector CMLT fills byte lanes below zero
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a8204e # cmlt v0.16b, v1.16b, #0
+aei
+aeip
+aer v1l=0xfe7e810001ff7f80
+aer v1h=0x7eff01fe7f008002
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xff00ff0000ff00ff
+0xff00ff0000ff00
+EOF
+RUN
+
+NAME=arm64 ESIL vector CMLT D form zero-extends the upper half
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a8a00e # cmlt v0.2s, v1.2s, #0
+aei
+aeip
+aer v1l=0x0000000180000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffff
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL FCMEQ matches signed zeros and skips NaN
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20d8a04e # fcmeq v0.4s, v1.4s, #0.0
+aei
+aeip
+aer v1l=0x8000000000000000
+aer v1h=0x3f8000007fc00000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20d8a05e @ 0 # fcmeq s0, s1, #0.0
+aeip
+aer v1l=0x80000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffffffffffff
+0x00000000
+0xffffffff
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL FCMGE FCMGT order compare against zero
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20c8e06e # fcmge v0.2d, v1.2d, #0.0
+aei
+aeip
+aer v1l=0xbff8000000000000
+aer v1h=0x7ff0000000000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20c8a04e @ 0 # fcmgt v0.4s, v1.4s, #0.0
+aeip
+aer v1l=0x7f80000000000000
+aer v1h=0x7fc00000ff800000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00000000
+0xffffffffffffffff
+0xffffffff00000000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL FCMLE FCMLT order compare against zero
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20d8a06e # fcmle v0.4s, v1.4s, #0.0
+aei
+aeip
+aer v1l=0x00000000c0000000
+aer v1h=0x7fc000003f800000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20e8a05e @ 0 # fcmlt s0, s1, #0.0
+aeip
+aer v1l=0xc0000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20e8a05e @ 0 # fcmlt s0, s1, #0.0 with negative zero
+aeip
+aer v1l=0x80000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffffffffffff
+0x00000000
+0xffffffff
+0x00000000
+0x00000000
+0x00000000
+EOF
+RUN
