@@ -1644,8 +1644,7 @@ static void arm64_esil_rev_vector(RAnalOp *op, csh *handle, cs_insn *insn, int v
 // fixed-point fraction bits of the scvtf/ucvtf/fcvtzs/fcvtzu #imm forms
 static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn, int scale) {
 	cs_arm64_op src = INSOP64 (1);
-	int lanes = vas_count (src.vas);
-	int lane_bits = vector_size (&src);
+	int lanes = vas_count (src.vas), lane_bits = vector_size (&src);
 	int i;
 	for (i = 0; i < lanes; i++) {
 		if (i > 0) {
@@ -1724,8 +1723,19 @@ static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn, int sc
 			VECARG64_APPEND (&op->esil, 1, i, 0);
 			r_strbuf_append (&op->esil, ",F2D,DUP,0,I2D,SWAP,F<,?{,CEIL,}{,FLOOR,},D2F,");
 			break;
+		case ARM64_INS_FABS:
+			// mask off the lane sign bit, no fp roundtrip needed
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",&,",
+				(ut64)(bitmask_by_width[lane_bits - 1] & ~(1ULL << (lane_bits - 1))));
+			break;
+		case ARM64_INS_FNEG:
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",^,", (ut64)(1ULL << (lane_bits - 1)));
+			break;
 		case ARM64_INS_RBIT:
 		{
+			int s;
 			// xor-shift conditional bit swaps, one stage per bit position;
 			// the running lane value lives in tmp so every subexpression
 			// stays within 64 bits
@@ -1733,7 +1743,6 @@ static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn, int sc
 				0x5555555555555555ULL, 0x3333333333333333ULL, 0x0F0F0F0F0F0F0F0FULL,
 				0x00FF00FF00FF00FFULL, 0x0000FFFF0000FFFFULL, 0x00000000FFFFFFFFULL
 			};
-			int s;
 			VECARG64_APPEND (&op->esil, 1, i, 0);
 			r_strbuf_append (&op->esil, ",tmp,=");
 			for (s = 0; (1 << s) < lane_bits; s++) {
@@ -2187,14 +2196,28 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		break;
 	}
 	case ARM64_INS_FABS:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			arm64_esil_vec_unary (op, handle, insn, 0);
+			break;
+		}
 		// F< compares top<second, so swap to test val<0
 		r_strbuf_setf (&op->esil, "%d,DUP,%s,F2D,DUP,0,I2D,SWAP,F<,?{,-F,},D2F,%s,=",
 			REGBITS64 (1), REG64 (1), REG64 (0));
 		break;
+	}
 	case ARM64_INS_FNEG:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			arm64_esil_vec_unary (op, handle, insn, 0);
+			break;
+		}
 		r_strbuf_setf (&op->esil, "%d,DUP,%s,F2D,-F,D2F,%s,=",
 			REGBITS64 (1), REG64 (1), REG64 (0));
 		break;
+	}
 	case ARM64_INS_FMIN:
 		r_strbuf_setf (&op->esil, "%d,%s,F2D,%d,%s,F2D,F<,?{,%s,}{,%s,},%s,=",
 			REGBITS64 (2), REG64 (2),
