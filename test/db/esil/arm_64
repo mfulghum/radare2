@@ -3794,3 +3794,79 @@ EXPECT=<<EOF
 0x00000000
 EOF
 RUN
+
+NAME=arm64 ESIL vector FCVTN narrows two lanes and zeroes upper
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2068610e # fcvtn v0.2s, v1.2d
+aei
+aeip
+aer v1l=0x3ff8000000000000
+aer v1h=0xc004000000000000
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xc02000003fc00000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector FCVTN2 fills upper lanes keeping lower
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2068614e # fcvtn2 v0.4s, v1.2d
+aei
+aeip
+aer v1l=0x3ff8000000000000
+aer v1h=0xc004000000000000
+aer v0l=0x1122334455667788
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x1122334455667788
+0xc02000003fc00000
+EOF
+RUN
+
+NAME=arm64 ESIL vector FCVTL widens two lanes to fp64
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2078610e # fcvtl v0.2d, v1.2s
+aei
+aeip
+aer v1l=0xc000000040000000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x4000000000000000
+0xc000000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector FCVTL2 widens the upper two lanes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2078614e # fcvtl2 v0.2d, v1.4s
+aei
+aeip
+aer v1h=0x3fc0000040200000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x4004000000000000
+0x3ff8000000000000
+EOF
+RUN

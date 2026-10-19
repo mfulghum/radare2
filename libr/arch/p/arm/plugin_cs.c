@@ -1759,6 +1759,43 @@ static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn, int sc
 	}
 }
 
+// narrowing/widening fp lane pairs for fcvtn/fcvtn2/fcvtl/fcvtl2
+static void arm64_esil_vec_fcvtnl(RAnalOp *op, csh *handle, cs_insn *insn) {
+	bool upper = false, narrow = false;
+	int i;
+	switch (insn->id) {
+	case ARM64_INS_FCVTN:
+		narrow = true;
+		break;
+	case ARM64_INS_FCVTN2:
+		narrow = true;
+		upper = true;
+		break;
+	case ARM64_INS_FCVTL:
+		break;
+	case ARM64_INS_FCVTL2:
+		upper = true;
+		break;
+	default:
+		break;
+	}
+	for (i = 0; i < 2; i++) {
+		int src_i, dst_i;
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		// the *2 forms read or write the upper two lanes of the wide side
+		src_i = (!narrow && upper)? i + 2: i;
+		dst_i = (narrow && upper)? i + 2: i;
+		r_strbuf_appendf (&op->esil, "%d,%d,", vector_size (&INSOP64 (0)),
+			vector_size (&INSOP64 (1)));
+		VECARG64_APPEND (&op->esil, 1, src_i, 0);
+		r_strbuf_append (&op->esil, ",F2D,D2F,");
+		VEC64_DST_APPEND (&op->esil, 0, dst_i);
+		r_strbuf_append (&op->esil, ",=");
+	}
+}
+
 static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh *handle, cs_insn *insn) {
 	r_strbuf_init (&op->esil);
 	r_strbuf_set (&op->esil, "");
@@ -2107,6 +2144,12 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		if (*postfix && (insn->id == ARM64_INS_FCCMP || insn->id == ARM64_INS_FCCMPE)) {
 			r_strbuf_appendf (&op->esil, ",}{,pstate,1,28,1,<<,-,&,0x%"PFMT64x",|,pstate,:=", IMM64 (2) << 28);
 		}
+		break;
+	case ARM64_INS_FCVTN:
+	case ARM64_INS_FCVTN2:
+	case ARM64_INS_FCVTL:
+	case ARM64_INS_FCVTL2:
+		arm64_esil_vec_fcvtnl (op, handle, insn);
 		break;
 	case ARM64_INS_FCVT:
 		r_strbuf_setf (&op->esil, "%d,%d,%s,F2D,D2F,%s,=",
@@ -4417,6 +4460,10 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		op->type = R_ANAL_OP_TYPE_NOT;
 		break;
 	case ARM64_INS_FCVT:
+	case ARM64_INS_FCVTN:
+	case ARM64_INS_FCVTN2:
+	case ARM64_INS_FCVTL:
+	case ARM64_INS_FCVTL2:
 	case ARM64_INS_FCVTAS:
 	case ARM64_INS_FCVTAU:
 	case ARM64_INS_FCVTMS:
