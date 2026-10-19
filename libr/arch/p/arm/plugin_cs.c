@@ -1640,8 +1640,9 @@ static void arm64_esil_rev_vector(RAnalOp *op, csh *handle, cs_insn *insn, int v
 	}
 }
 
-// apply a per-lane unary op over each vas lane of src into dst
-static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn) {
+// apply a per-lane unary op over each vas lane of src into dst; scale is the
+// fixed-point fraction bits of the scvtf/ucvtf/fcvtzs/fcvtzu #imm forms
+static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn, int scale) {
 	cs_arm64_op src = INSOP64 (1);
 	int lanes = vas_count (src.vas);
 	int lane_bits = vector_size (&src);
@@ -1669,6 +1670,59 @@ static void arm64_esil_vec_unary(RAnalOp *op, csh *handle, cs_insn *insn) {
 			r_strbuf_appendf (&op->esil, "%d,", lane_bits);
 			VECARG64_APPEND (&op->esil, 1, i, 0);
 			r_strbuf_append (&op->esil, ",CLZ,");
+			break;
+		case ARM64_INS_SCVTF:
+			// sign-extend the lane, then scale by 2^-scale for the
+			// fixed-point form before converting the integer to fp
+			r_strbuf_appendf (&op->esil, "%d,%d,", lane_bits, lane_bits);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",~,I2D,");
+			if (scale) {
+				r_strbuf_appendf (&op->esil, "0x%" PFMT64x ",I2D,SWAP,F/,", (ut64)1 << scale);
+			}
+			r_strbuf_append (&op->esil, "D2F,");
+			break;
+		case ARM64_INS_UCVTF:
+			r_strbuf_appendf (&op->esil, "%d,", lane_bits);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",U2D,");
+			if (scale) {
+				r_strbuf_appendf (&op->esil, "0x%" PFMT64x ",I2D,SWAP,F/,", (ut64)1 << scale);
+			}
+			r_strbuf_append (&op->esil, "D2F,");
+			break;
+		case ARM64_INS_FCVTZS:
+		case ARM64_INS_FCVTZU:
+			// D2I truncates toward zero like the Z forms; the fixed-point
+			// form scales the double before the truncation
+			r_strbuf_appendf (&op->esil, "%d,", lane_bits);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",F2D,");
+			if (scale) {
+				r_strbuf_appendf (&op->esil, "0x%" PFMT64x ",I2D,F*,", (ut64)1 << scale);
+			}
+			r_strbuf_append (&op->esil, "D2I,");
+			break;
+		case ARM64_INS_FRINTN:
+		case ARM64_INS_FRINTI:
+		case ARM64_INS_FRINTX:
+		case ARM64_INS_FRINTA:
+		case ARM64_INS_FRINTP:
+		case ARM64_INS_FRINTM:
+		{
+			const char *rounder = (insn->id == ARM64_INS_FRINTA ||
+				insn->id == ARM64_INS_FRINTP)? "CEIL":
+				insn->id == ARM64_INS_FRINTM? "FLOOR": "ROUND";
+			r_strbuf_appendf (&op->esil, "%d,DUP,", lane_bits);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",F2D,%s,D2F,", rounder);
+			break;
+		}
+		case ARM64_INS_FRINTZ:
+			// toward zero: ceil when negative, floor otherwise
+			r_strbuf_appendf (&op->esil, "%d,DUP,", lane_bits);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",F2D,DUP,0,I2D,SWAP,F<,?{,CEIL,}{,FLOOR,},D2F,");
 			break;
 		case ARM64_INS_RBIT:
 		{
@@ -2050,19 +2104,35 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 			REGBITS64 (0), REGBITS64 (1), REG64 (1), REG64 (0));
 		break;
 	case ARM64_INS_SCVTF:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			int scale = insn->detail->arm64.op_count > 2? (int)IMM64 (2): 0;
+			arm64_esil_vec_unary (op, handle, insn, scale);
+			break;
+		}
 		r_strbuf_setf (&op->esil, "%d,", REGBITS64 (0));
 		ARG64_SIGN_APPEND (&op->esil, 1, REGBITS64 (1));
 		r_strbuf_append (&op->esil, ",I2D,D2F,");
 		VEC64_DST_APPEND (&op->esil, 0, -1);
 		r_strbuf_append (&op->esil, ",=");
 		break;
+	}
 	case ARM64_INS_UCVTF:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			int scale = insn->detail->arm64.op_count > 2? (int)IMM64 (2): 0;
+			arm64_esil_vec_unary (op, handle, insn, scale);
+			break;
+		}
 		r_strbuf_setf (&op->esil, "%d,", REGBITS64 (0));
 		ARG64_APPEND (&op->esil, 1);
 		r_strbuf_append (&op->esil, ",U2D,D2F,");
 		VEC64_DST_APPEND (&op->esil, 0, -1);
 		r_strbuf_append (&op->esil, ",=");
 		break;
+	}
 	case ARM64_INS_FCVTAU:
 	case ARM64_INS_FCVTAS:
 	case ARM64_INS_FCVTMU:
@@ -2073,6 +2143,14 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_FCVTPS:
 	case ARM64_INS_FCVTZU:
 	case ARM64_INS_FCVTZS:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if ((insn->id == ARM64_INS_FCVTZU || insn->id == ARM64_INS_FCVTZS)
+			&& is_vector_op (&src)) {
+			int scale = insn->detail->arm64.op_count > 2? (int)IMM64 (2): 0;
+			arm64_esil_vec_unary (op, handle, insn, scale);
+			break;
+		}
 		// TODO: unsigned int won't be right, idk entirely what it even means
 		// also the rounding mode... idk i hate floats
 		r_strbuf_setf (&op->esil, "%d,", REGBITS64 (1));
@@ -2081,6 +2159,7 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		VEC64_DST_APPEND (&op->esil, 0, -1);
 		r_strbuf_append (&op->esil, ",=");
 		break;
+	}
 	case ARM64_INS_FRINTA:
 	case ARM64_INS_FRINTI:
 	case ARM64_INS_FRINTN:
@@ -2089,10 +2168,15 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_FRINTP:
 	case ARM64_INS_FRINTM:
 	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src)) {
+			arm64_esil_vec_unary (op, handle, insn, 0);
+			break;
+		}
 		char* rounder = "ROUND";
 		if (insn->id == ARM64_INS_FRINTM) {
 			rounder = "FLOOR";
-		} else if (insn->id == ARM64_INS_FRINTP) {
+		} else if (insn->id == ARM64_INS_FRINTP || insn->id == ARM64_INS_FRINTA) {
 			rounder = "CEIL";
 		}
 		r_strbuf_setf (&op->esil, "%d,DUP,", REGBITS64 (1));
@@ -2206,7 +2290,7 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		cs_arm64_op src = INSOP64 (1);
 		int bits = 8 * REGSIZE64 (0);
 		if (is_vector_op (&src)) {
-			arm64_esil_vec_unary (op, handle, insn);
+			arm64_esil_vec_unary (op, handle, insn, 0);
 		} else {
 			// count leading sign bits: flip negative values, then count the
 			// leading zeros of the low bits-1 bits (the sign bit itself is
@@ -2220,7 +2304,7 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	{
 		cs_arm64_op src = INSOP64 (1);
 		if (is_vector_op (&src)) {
-			arm64_esil_vec_unary (op, handle, insn);
+			arm64_esil_vec_unary (op, handle, insn, 0);
 		} else {
 			r_strbuf_setf (&op->esil, "%d,%s,CLZ,%s,=",
 				8 * REGSIZE64 (0), REG64 (1), REG64 (0));
@@ -2233,7 +2317,7 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		// scalar cnt is a base A64 instruction gated by FEAT_CSSC, which the
 		// bundled capstone does not decode, so only the vector form lands here
 		if (is_vector_op (&src)) {
-			arm64_esil_vec_unary (op, handle, insn);
+			arm64_esil_vec_unary (op, handle, insn, 0);
 		}
 		break;
 	}
@@ -2746,7 +2830,7 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	{
 		cs_arm64_op src = INSOP64 (1);
 		if (is_vector_op (&src)) {
-			arm64_esil_vec_unary (op, handle, insn);
+			arm64_esil_vec_unary (op, handle, insn, 0);
 		} else {
 			// slightly shorter expression to reverse bits
 			r_strbuf_setf (&op->esil, "0,tmp,=,0,DUP,DUP,DUP,%d,-,%s,>>,1,&,<<,tmp,+=,%d,-,?{,++,4,GOTO,},tmp,%s,=",

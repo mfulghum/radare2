@@ -3531,3 +3531,187 @@ EXPECT=<<EOF
 0x00000000
 EOF
 RUN
+
+NAME=arm64 ESIL vector SCVTF converts int lanes to fp
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20d8214e # scvtf v0.4s, v1.4s
+aei
+aeip
+aer v1l=0xffffffff00000001
+aer v1h=0x0000010080000000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xbf8000003f800000
+0x43800000cf000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SCVTF fixed-point divides lanes by 2^frac
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20e43d4f # scvtf v0.4s, v1.4s, #3
+aei
+aeip
+aer v1l=0x0000000800000001
+aes
+aer v0l
+EOF
+EXPECT=<<EOF
+0x3f8000003e000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector UCVTF converts unsigned lanes to fp64
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20d8616e # ucvtf v0.2d, v1.2d
+aei
+aeip
+aer v1l=0x0000000000000003
+aer v1h=0x4000000000000000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x4008000000000000
+0x43d0000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SCVTF D-form zeroes upper half
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20d8210e # scvtf v0.2s, v1.2s
+aei
+aeip
+aer v1l=0xffffffff00000002
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xbf80000040000000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector FRINTN rounds lanes to nearest
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2088214e # frintn v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x402000003fc00000
+aer v1h=0x3eccccddbfc00000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x4040000040000000
+0xc0000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector FRINTZ truncates lanes toward zero
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2098a14e # frintz v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x402000003fc00000
+aer v1h=0x3eccccddbfc00000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x400000003f800000
+0xbf800000
+EOF
+RUN
+
+NAME=arm64 ESIL vector FRINTA rounds lanes toward positive infinity
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2088216e # frinta v0.4s, v1.4s
+aei
+aeip
+aer v1l=0xbfc000003fc00000
+aes
+aer v0l
+EOF
+EXPECT=<<EOF
+0xbf80000040000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector FRINTX D-form rounds to nearest
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2098616e # frintx v0.2d, v1.2d
+aei
+aeip
+aer v1l=0x3ff8000000000000
+aer v1h=0xc004000000000000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x4000000000000000
+0xc008000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector FCVTZS truncates fp lanes to int
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20b8a14e # fcvtzs v0.4s, v1.4s
+aei
+aeip
+aer v1l=0xc02ccccd3ff33333
+aer v1h=0x3f66666640400000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xfffffffe00000001
+0x00000003
+EOF
+RUN
+
+NAME=arm64 ESIL vector FCVTZS fixed-point scales before truncating
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20fc3d4f # fcvtzs v0.4s, v1.4s, #3
+aei
+aeip
+aer v1l=0xc02ccccd3ff33333
+aer v1h=0x3f66666640400000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffeb0000000f
+0x700000018
+EOF
+RUN
