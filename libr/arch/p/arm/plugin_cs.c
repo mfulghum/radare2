@@ -1978,10 +1978,12 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		cs_arm64_op dst = INSOP64 (0);
 		cs_arm64_op src = INSOP64 (1);
 
-		if (dst.vas && src.vas) {
+		if (dst.vas && src.vas && dst.vector_index == -1 && src.vector_index == -1) {
 			r_strbuf_setf (&op->esil, "%sh,%sh,=,%sl,%sl,=",
 				REG64 (1), REG64 (0), REG64 (1), REG64 (0));
 		} else {
+			// lane insert; the src lane comes from its vector_index when the
+			// source is a vector (ins/mov v0.s[1], v1.s[2] arrives as MOV)
 			ARG64_APPEND (&op->esil, 1);
 			r_strbuf_append (&op->esil, ",");
 			VEC64_DST_APPEND (&op->esil, 0, -1);
