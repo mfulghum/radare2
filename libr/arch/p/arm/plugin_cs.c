@@ -1796,6 +1796,62 @@ static void arm64_esil_vec_fcvtnl(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// shifts whose count comes from the matching lane of the third operand; the
+// ISA takes SInt(op2_lane[7:0]) so only the low 8 bits of the lane matter
+static void arm64_esil_vec_shift_reg(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op src = INSOP64 (1);
+	int lanes = vas_count (src.vas);
+	int lane_bits = vector_size (&src);
+	bool unsrc = insn->id == ARM64_INS_USHL || insn->id == ARM64_INS_URSHL;
+	bool rounded = insn->id == ARM64_INS_SRSHL || insn->id == ARM64_INS_URSHL;
+	int up = 64 - lane_bits;
+	int i;
+	for (i = 0; i < lanes; i++) {
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		RStrBuf vs, ss, svb, xb, rb;
+		r_strbuf_init (&vs);
+		r_strbuf_init (&ss);
+		r_strbuf_init (&svb);
+		r_strbuf_init (&xb);
+		r_strbuf_init (&rb);
+		VECARG64_APPEND (&vs, 1, i, 0);
+		VECARG64_APPEND (&ss, 2, i, 0);
+		const char *v = r_strbuf_get (&vs);
+		const char *s = r_strbuf_get (&ss);
+		// signed shift count from the low 8 bits of the shift lane
+		r_strbuf_appendf (&svb, "0xff,%s,&,56,SWAP,<<,56,SWAP,ASR", s);
+		const char *sv = r_strbuf_get (&svb);
+		// right by -sv: sign fill unless the source is unsigned; when
+		// rounding, RShr's half unit becomes (v ASR n) + ((v ASR (n-1)) & 1)
+		if (unsrc) {
+			if (rounded) {
+				r_strbuf_appendf (&rb, "%s,0,-,%s,>>,1,%s,0,-,-,%s,>>,1,&,+",
+					sv, v, sv, v);
+			} else {
+				r_strbuf_appendf (&rb, "%s,0,-,%s,>>", sv, v);
+			}
+		} else if (rounded) {
+			r_strbuf_appendf (&rb,
+				"%s,0,-,%d,%d,%s,<<,ASR,ASR,1,%s,0,-,-,%d,%d,%s,<<,ASR,ASR,1,&,+",
+				sv, up, up, v, sv, up, up, v);
+		} else {
+			r_strbuf_appendf (&rb, "%s,0,-,%d,%d,%s,<<,ASR,ASR", sv, up, up, v);
+		}
+		const char *right = r_strbuf_get (&rb);
+		// sv >= 0 selects the plain left shift (sv == 0 must not round);
+		// the lane mask comes from the destination append below
+		r_strbuf_appendf (&op->esil, "0,%s,<,!,?{,%s,%s,<<,}{,%s,},", sv, sv, v, right);
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&vs);
+		r_strbuf_fini (&ss);
+		r_strbuf_fini (&svb);
+		r_strbuf_fini (&rb);
+	}
+}
+
 // per-lane shifts by #imm
 static void arm64_esil_vec_shift(RAnalOp *op, csh *handle, cs_insn *insn, int amount) {
 	cs_arm64_op src = INSOP64 (1);
@@ -2969,6 +3025,19 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 			arm64_esil_vec_shift (op, handle, insn, IMM64 (2));
 		}
 		// SVE predicate forms and anything unexpected stay unemulated
+		break;
+	}
+	case ARM64_INS_SSHL:
+	case ARM64_INS_USHL:
+	case ARM64_INS_SRSHL:
+	case ARM64_INS_URSHL:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src) && is_vector_op (&INSOP64 (0))
+			&& is_vector_op (&INSOP64 (2)) && INSOP64 (1).vas == INSOP64 (2).vas) {
+			arm64_esil_vec_shift_reg (op, handle, insn);
+		}
+		// SVE predicated forms stay unemulated
 		break;
 	}
 	case ARM64_INS_RBIT:

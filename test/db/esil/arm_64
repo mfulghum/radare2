@@ -4024,3 +4024,125 @@ EXPECT=<<EOF
 0xaa123456ee000000
 EOF
 RUN
+
+NAME=arm64 ESIL vector SSHL shifts lanes by low 8 bits of shift lane
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2044a24e # sshl v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x7fffffff80000000
+aer v1h=0x0000ff00fffffff0
+aer v2l=0xffffffff00000005
+aer v2h=0x000001ff00000004
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x3fffffff00000000
+0x7f80ffffff00
+EOF
+RUN
+
+NAME=arm64 ESIL vector SSHL sign-fills right shifts and clamps counts
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2044224e # sshl v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v1l=0x01ff7f80
+aer v2l=0x7f80f8f8
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00ff00ff
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector USHL zero-fills right shifts
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2044226e # ushl v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v1l=0xff800f81
+aer v1h=0x40ff015500000000
+aer v2l=0x800103fe
+aer v2h=0x0102fe7f00000000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00007820
+0x80fc000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SRSHL rounds right shifts toward plus infinity
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2054a20e # srshl v0.2s, v1.2s, v2.2s
+aei
+aeip
+aer v1l=0xffffffff00000007
+aer v2l=0x000000ff000000fd
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00000001
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SRSHL rounds byte lanes including negatives
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2054224e # srshl v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v1l=0x7f800103
+aer v2l=0xffffffff
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x40c00102
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector URSHL rounds unsigned lanes with zero fill
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2054222e # urshl v0.8b, v1.8b, v2.8b
+aei
+aeip
+aer v1l=0x00000000ff030005
+aer v2l=0x00000000fe0100fd
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x40060001
+0x00000000
+EOF
+RUN
