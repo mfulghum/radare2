@@ -3715,3 +3715,25 @@ EXPECT=<<EOF
 0x700000018
 EOF
 RUN
+
+NAME=arm64 ESIL scalar FABS keeps magnitude for both signs
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20c0201e # fabs s0, s1
+aei
+aeip
+aer s1=0xc0000000
+aes
+aer s0
+wx 20c0201e @ 0
+aeip
+aer s1=0x40000000
+aes
+aer s0
+EOF
+EXPECT=<<EOF
+0x40000000
+0x40000000
+EOF
+RUN
