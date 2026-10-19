@@ -1971,6 +1971,134 @@ static void arm64_esil_vec_shll(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// narrowing shift right; source lanes are twice as wide as the destination
+// lanes and the 2 forms write the upper half of the destination register
+static void arm64_esil_vec_shrn(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst = INSOP64 (0);
+	int lanes = vas_count (dst.vas), esize = vector_size (&dst);
+	bool upper = false, rounded = false, unsrc = false, satun = false;
+	int elements, up, amount, i;
+	ut64 mask, maxs, mins;
+	switch (insn->id) {
+	case ARM64_INS_SHRN:
+		unsrc = true;
+		break;
+	case ARM64_INS_SHRN2:
+		unsrc = true;
+		upper = true;
+		break;
+	case ARM64_INS_RSHRN:
+		unsrc = true;
+		rounded = true;
+		break;
+	case ARM64_INS_RSHRN2:
+		unsrc = true;
+		rounded = true;
+		upper = true;
+		break;
+	case ARM64_INS_SQSHRN:
+		break;
+	case ARM64_INS_SQSHRN2:
+		upper = true;
+		break;
+	case ARM64_INS_SQRSHRN:
+		rounded = true;
+		break;
+	case ARM64_INS_SQRSHRN2:
+		rounded = true;
+		upper = true;
+		break;
+	case ARM64_INS_SQSHRUN:
+		satun = true;
+		break;
+	case ARM64_INS_SQSHRUN2:
+		satun = true;
+		upper = true;
+		break;
+	case ARM64_INS_SQRSHRUN:
+		satun = true;
+		rounded = true;
+		break;
+	case ARM64_INS_SQRSHRUN2:
+		satun = true;
+		rounded = true;
+		upper = true;
+		break;
+	default:
+		break;
+	}
+	elements = upper? lanes / 2: lanes;
+	up = 64 - esize * 2;
+	amount = IMM64 (2);
+	mask = bitmask_by_width[esize - 1];
+	maxs = bitmask_by_width[esize - 2];
+	mins = ~maxs;
+	for (i = 0; i < elements; i++) {
+		int dst_i;
+		RStrBuf src_lane, asr_expr, lshr_expr;
+		const char *val;
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		dst_i = upper? i + elements: i;
+		r_strbuf_init (&src_lane);
+		r_strbuf_init (&asr_expr);
+		r_strbuf_init (&lshr_expr);
+		VECARG64_APPEND (&src_lane, 1, i, 0);
+		val = r_strbuf_get (&src_lane);
+		if (unsrc) {
+			// logical shift then truncate; RShr's half unit becomes
+			// (val >> n) + ((val >> (n - 1)) & 1) when rounding
+			if (rounded) {
+				r_strbuf_appendf (&lshr_expr, "%d,%s,>>,1,%d,-,%s,>>,1,&,+",
+					amount, val, amount, val);
+			} else {
+				r_strbuf_appendf (&lshr_expr, "%d,%s,>>", amount, val);
+			}
+			r_strbuf_appendf (&op->esil, "%s,", r_strbuf_get (&lshr_expr));
+		} else {
+			const char *asr, *y;
+			// arithmetic shift of the sign-extended lane, kept in tmp so
+			// the saturation probes do not repeat the whole expression
+			r_strbuf_appendf (&asr_expr, "%d,%d,%s,<<,ASR", up, up, val);
+			asr = r_strbuf_get (&asr_expr);
+			if (rounded) {
+				r_strbuf_appendf (&lshr_expr, "%d,%s,ASR,1,%d,-,%s,ASR,1,&,+",
+					amount, asr, amount, asr);
+			} else {
+				r_strbuf_appendf (&lshr_expr, "%d,%s,ASR", amount, asr);
+			}
+			y = r_strbuf_get (&lshr_expr);
+			if (satun) {
+				// clamp to [0, maxu]: the shifted value is sign extended
+				// and below 2^63, so plain signed compares decide; the
+				// positive probe must not fire for negative results
+				r_strbuf_appendf (&op->esil,
+					"%s,tmp,=,"
+					"0x%"PFMT64x",tmp,>,0,tmp,<,!,*,0x%"PFMT64x",*,"
+					"0x%"PFMT64x",tmp,>,0,tmp,<,!,*,0,tmp,<,|,0x%"PFMT64x",*,"
+					"0xffffffffffffffff,^,tmp,&,|,",
+					y, mask, mask, mask, mask);
+			} else {
+				// clamp to [mins, maxs]: (tmp & ~om) | (P*maxs + N*mins)
+				r_strbuf_appendf (&op->esil,
+					"%s,tmp,=,"
+					"0x%"PFMT64x",tmp,>,0x%"PFMT64x",*,0x%"PFMT64x",tmp,<,0x%"PFMT64x",*,+,"
+					"0x%"PFMT64x",tmp,>,0x%"PFMT64x",*,0x%"PFMT64x",tmp,<,0x%"PFMT64x",*,|,"
+					"0xffffffffffffffff,^,tmp,&,|,",
+					y,
+					maxs, maxs, mins, mins,
+					maxs, mask, mins, mask);
+			}
+		}
+		VEC64_DST_APPEND (&op->esil, 0, dst_i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&src_lane);
+		r_strbuf_fini (&asr_expr);
+		r_strbuf_fini (&lshr_expr);
+	}
+}
+
 // per-lane shifts by #imm
 static void arm64_esil_vec_shift(RAnalOp *op, csh *handle, cs_insn *insn, int amount) {
 	cs_arm64_op src = INSOP64 (1);
@@ -3171,6 +3299,26 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		cs_arm64_op dst = INSOP64 (0);
 		if (is_vector_op (&dst) && is_vector_op (&INSOP64 (1)) && ISIMM64 (2)) {
 			arm64_esil_vec_shll (op, handle, insn);
+		}
+		break;
+	}
+	case ARM64_INS_SHRN:
+	case ARM64_INS_SHRN2:
+	case ARM64_INS_RSHRN:
+	case ARM64_INS_RSHRN2:
+	case ARM64_INS_SQSHRN:
+	case ARM64_INS_SQSHRN2:
+	case ARM64_INS_SQRSHRN:
+	case ARM64_INS_SQRSHRN2:
+	case ARM64_INS_SQSHRUN:
+	case ARM64_INS_SQSHRUN2:
+	case ARM64_INS_SQRSHRUN:
+	case ARM64_INS_SQRSHRUN2:
+	{
+		cs_arm64_op dst = INSOP64 (0);
+		if (is_vector_op (&dst) && is_vector_op (&INSOP64 (1)) && ISIMM64 (2)
+			&& vector_size (&INSOP64 (1)) == vector_size (&dst) * 2) {
+			arm64_esil_vec_shrn (op, handle, insn);
 		}
 		break;
 	}
@@ -4732,6 +4880,20 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		break;
 	case ARM64_INS_LSR:
 		op->cycles = 1;
+		op->type = R_ANAL_OP_TYPE_SHR;
+		break;
+	case ARM64_INS_SHRN:
+	case ARM64_INS_SHRN2:
+	case ARM64_INS_RSHRN:
+	case ARM64_INS_RSHRN2:
+	case ARM64_INS_SQSHRN:
+	case ARM64_INS_SQSHRN2:
+	case ARM64_INS_SQRSHRN:
+	case ARM64_INS_SQRSHRN2:
+	case ARM64_INS_SQSHRUN:
+	case ARM64_INS_SQSHRUN2:
+	case ARM64_INS_SQRSHRUN:
+	case ARM64_INS_SQRSHRUN2:
 		op->type = R_ANAL_OP_TYPE_SHR;
 		break;
 	case ARM64_INS_ASR:

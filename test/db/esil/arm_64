@@ -4486,3 +4486,222 @@ EXPECT=<<EOF
 0x00000000
 EOF
 RUN
+
+NAME=arm64 ESIL vector SHRN truncates logical right shifts of halfwords
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2084090f # shrn v0.8b, v1.8h, #7
+aei
+aeip
+aer v1l=0x00400080ffff8100
+aer v1h=0x0100ff0000ff0001
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x2fe01000001ff02
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SHRN keeps full width before truncating
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2084110f # shrn v0.4h, v1.4s, #15
+aei
+aeip
+aer v1l=0xffffffff80000000
+aer v1h=0x0001000000008000
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x20001ffff0000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SHRN2 writes the upper half keeping the lower half
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20840f4f # shrn2 v0.16b, v1.8h, #1
+aei
+aeip
+aer v0l=0x1122334455667788
+aer v0h=0xffffffffffffffff
+aer v1l=0x00020004000800ff
+aer v1h=0xffff800001000001
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x1122334455667788
+0xff0080000102047f
+EOF
+RUN
+
+NAME=arm64 ESIL vector RSHRN rounds right shifts toward plus infinity
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 208c090f # rshrn v0.8b, v1.8h, #7
+aei
+aeip
+aer v1l=0xffff003f00408040
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00000101
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector RSHRN rounds wide doubleword lanes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 208c210f # rshrn v0.2s, v1.2d, #31
+aei
+aeip
+aer v1l=0x0000000080000001
+aer v1h=0x000000017fffffff
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x300000001
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector RSHRN2 rounds into the upper half
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 208c0f4f # rshrn2 v0.16b, v1.8h, #1
+aei
+aeip
+aer v0l=0xdeadbeefcafe0011
+aer v0h=0xffffffffffffffff
+aer v1l=0x8000ffff00010003
+aer v1h=0x0000000000feff01
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xdeadbeefcafe0011
+0x7f8100000102
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQSHRN saturates signed right shifts to the lane range
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20940f0f # sqshrn v0.8b, v1.8h, #1
+aei
+aeip
+aer v1l=0xfff0010000ff8000
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xf87f7f80
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQSHRN2 saturates into the upper half
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20940f4f # sqshrn2 v0.16b, v1.8h, #1
+aei
+aeip
+aer v0l=0x1111111111111111
+aer v0h=0xffffffffffffffff
+aer v1l=0xffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x1111111111111111
+0x000000ff
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQRSHRN rounds and clamps to the signed minimum
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 209c3d0f # sqrshrn v0.2s, v1.2d, #3
+aei
+aeip
+aer v1l=0xffffffffffffffff
+aer v1h=0xfffffff000000000
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x8000000000000000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQSHRUN clamps negative lanes to zero and keeps in-range values
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20840f2f # sqshrun v0.8b, v1.8h, #1
+aei
+aeip
+aer v1l=0x800001000200ffff
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x0080ff00
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQRSHRUN rounds signed lanes into the unsigned range
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 208c1e2f # sqrshrun v0.4h, v1.4s, #2
+aei
+aeip
+aer v1l=0x00040000ffffffff
+aer v1h=0xfffffffc00010002
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x4001ffff0000
+0x00000000
+EOF
+RUN
