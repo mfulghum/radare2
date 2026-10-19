@@ -1837,6 +1837,198 @@ static void arm64_esil_vec_cmpzero(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// register forms of the compares: every lane becomes all-ones or all-zeros
+// by the predicate between the two source lanes; fp16 lanes are left
+// unemulated by the caller and the fp forms also cover the scalar s/d views
+static void arm64_esil_vec_cmpreg(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op src = INSOP64 (1);
+	bool vector = is_vector_op (&src);
+	int lanes = vector? vas_count (src.vas): 1, esize = vector? vector_size (&src): REGSIZE64 (1) * 8;
+	int up = 64 - esize;
+	ut64 signbit = 1ULL << (esize - 1);
+	int i;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b;
+		const char *a, *b;
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		VECARG64_APPEND (&lane_b, 2, i, 0);
+		a = r_strbuf_get (&lane_a);
+		b = r_strbuf_get (&lane_b);
+		switch (insn->id) {
+		case ARM64_INS_CMEQ:
+			// xor then the zero test stands in for integer equality
+			r_strbuf_appendf (&op->esil, "%s,%s,^,!,", a, b);
+			break;
+		case ARM64_INS_CMGE:
+			r_strbuf_appendf (&op->esil,
+				"%d,%d,%s,<<,ASR,%d,%d,%s,<<,ASR,<,!,", up, up, b, up, up, a);
+			break;
+		case ARM64_INS_CMGT:
+			r_strbuf_appendf (&op->esil,
+				"%d,%d,%s,<<,ASR,%d,%d,%s,<<,ASR,<,", up, up, a, up, up, b);
+			break;
+		case ARM64_INS_CMHI:
+			// flipping the sign bit and re-reading the lane as a signed
+			// value orders the lanes correctly for the VM's signed compare
+			r_strbuf_appendf (&op->esil,
+				"%d,%d,0x%" PFMT64x ",%s,^,<<,ASR,%d,%d,0x%" PFMT64x ",%s,^,<<,ASR,>,",
+				up, up, signbit, b, up, up, signbit, a);
+			break;
+		case ARM64_INS_CMHS:
+			r_strbuf_appendf (&op->esil,
+				"%d,%d,0x%" PFMT64x ",%s,^,<<,ASR,%d,%d,0x%" PFMT64x ",%s,^,<<,ASR,<,!,",
+				up, up, signbit, b, up, up, signbit, a);
+			break;
+		case ARM64_INS_CMTST:
+			r_strbuf_appendf (&op->esil, "%s,%s,&,!,!,", a, b);
+			break;
+		case ARM64_INS_FCMEQ:
+			r_strbuf_appendf (&op->esil, "%d,%s,F2D,%d,%s,F2D,F==,", esize, a, esize, b);
+			break;
+		case ARM64_INS_FCMGE:
+			// b <= a ordered, matching a >= b
+			r_strbuf_appendf (&op->esil, "%d,%s,F2D,%d,%s,F2D,F<=,", esize, a, esize, b);
+			break;
+		case ARM64_INS_FCMGT:
+			r_strbuf_appendf (&op->esil, "%d,%s,F2D,%d,%s,F2D,F<,", esize, a, esize, b);
+			break;
+		default:
+			break;
+		}
+		// negate the 0/1 predicate so true lanes become the all-ones mask;
+		// the dst append then truncates it to the lane width
+		r_strbuf_append (&op->esil, "0,-,");
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+	}
+}
+
+// value expression for FPMin/FPMax of the lane bit strings a and b, or
+// the FPMinNum/FPMaxNum variant selected by num; shared by the lane-wise
+// minmax and the across-vector FP reductions
+static void arm64_esil_minmax_expr(RStrBuf *out, int esize, bool ismax, bool num, const char *a, const char *b) {
+	const ut64 nanc = (esize == 32)? 0x7fc00000ULL: 0x7ff8000000000000ULL;
+	const ut64 qbit = (esize == 32)? 0x00400000ULL: 0x0008000000000000ULL;
+	const ut64 zmask = (1ULL << (esize - 1)) - 1; // magnitude bits of a lane
+	RStrBuf nan_a, nan_b, qnan_a, qnan_b, quiet_a, quiet_b, propagate, num_nan, pick, normalize;
+	const char *is_nan_a, *is_nan_b, *is_qnan_a, *is_qnan_b, *a_quieted, *b_quieted,
+		*propagated;
+	const char *nanbody, *picked, *normal;
+	r_strbuf_init (&nan_a);
+	r_strbuf_init (&nan_b);
+	r_strbuf_init (&qnan_a);
+	r_strbuf_init (&qnan_b);
+	r_strbuf_init (&quiet_a);
+	r_strbuf_init (&quiet_b);
+	r_strbuf_init (&propagate);
+	r_strbuf_init (&num_nan);
+	r_strbuf_init (&pick);
+	r_strbuf_init (&normalize);
+	// 0/1 expressions for the NaN-ness and quiet-NaN-ness of a lane
+	r_strbuf_appendf (&nan_a, "%d,%s,F2D,DUP,F==,!", esize, a);
+	r_strbuf_appendf (&nan_b, "%d,%s,F2D,DUP,F==,!", esize, b);
+	is_nan_a = r_strbuf_get (&nan_a);
+	is_nan_b = r_strbuf_get (&nan_b);
+	r_strbuf_appendf (&qnan_a, "%s,0x%" PFMT64x ",%s,&,!,!,&", is_nan_a, qbit, a);
+	r_strbuf_appendf (&qnan_b, "%s,0x%" PFMT64x ",%s,&,!,!,&", is_nan_b, qbit, b);
+	is_qnan_a = r_strbuf_get (&qnan_a);
+	is_qnan_b = r_strbuf_get (&qnan_b);
+	r_strbuf_appendf (&quiet_a, "%s,0x%" PFMT64x ",|", a, qbit);
+	r_strbuf_appendf (&quiet_b, "%s,0x%" PFMT64x ",|", b, qbit);
+	a_quieted = r_strbuf_get (&quiet_a);
+	b_quieted = r_strbuf_get (&quiet_b);
+	// FPProcessNaNs rules: two NaN lanes take the default NaN, one NaN
+	// operand wins quieted by its payload's quiet bit
+	r_strbuf_appendf (&propagate, "%s,%s,&,?{,0x%" PFMT64x ",}{,%s,?{,%s,}{,%s,?{,%s,"
+		"}{,0x%" PFMT64x ",},},},", is_nan_a, is_nan_b, nanc, is_nan_b, b_quieted, is_nan_a, a_quieted, nanc);
+	propagated = r_strbuf_get (&propagate);
+	nanbody = propagated;
+	if (num) {
+		// FPMinNum and FPMaxNum replace a quiet NaN with an infinity so
+		// it loses to the other operand, which then survives; a payload
+		// surviving that is a signaling NaN so it gets quieted
+		r_strbuf_appendf (&num_nan, "%s,%s,!,&,?{,%s,?{,%s,}{,%s,},}{,%s,%s,!,&,?{,%s,"
+			"?{,%s,}{,%s,},}{,%s,},},", is_qnan_a, is_qnan_b, is_nan_b, b_quieted, b, is_qnan_b, is_qnan_a, is_nan_a, a_quieted, a, propagated);
+		nanbody = r_strbuf_get (&num_nan);
+	}
+	// numeric selection by the ordered FP compare; equal lanes take
+	// operand 2 as FPMin and FPMax do
+	r_strbuf_appendf (&pick, "%d,%s,F2D,%d,%s,F2D,F<,?{,%s,}{,%s,},",
+		esize, ismax? a: b, esize, ismax? b: a, a, b);
+	picked = r_strbuf_get (&pick);
+	// both lanes zero: FPMin keeps the sign present in either operand,
+	// FPMax keeps the sign shared by both, so +/-0 pairs become -0 and
+	// +0 respectively
+	r_strbuf_appendf (&normalize, "0x%" PFMT64x ",%s,&,!,0x%" PFMT64x ",%s,&,!,&,?{,",
+		zmask, a, zmask, b);
+	if (ismax) {
+		r_strbuf_appendf (&normalize, "%s,%s,&,}{,%s,},", a, b, picked);
+	} else {
+		r_strbuf_appendf (&normalize, "%s,%s,|,}{,%s,},", a, b, picked);
+	}
+	normal = r_strbuf_get (&normalize);
+	r_strbuf_setf (out, "%s,%s,|,?{,%s,}{,%s,},", is_nan_a, is_nan_b, nanbody, normal);
+	r_strbuf_fini (&nan_a);
+	r_strbuf_fini (&nan_b);
+	r_strbuf_fini (&qnan_a);
+	r_strbuf_fini (&qnan_b);
+	r_strbuf_fini (&quiet_a);
+	r_strbuf_fini (&quiet_b);
+	r_strbuf_fini (&propagate);
+	r_strbuf_fini (&num_nan);
+	r_strbuf_fini (&pick);
+	r_strbuf_fini (&normalize);
+}
+
+// fmin/fmax/fminnm/fmaxnm per lane; the selection keeps the raw bits of the
+// chosen operand so the NaN payloads and the signed-zero sign forced by the
+// ISA survive without a float round-trip
+static void arm64_esil_vec_minmax(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op src = INSOP64 (1);
+	bool vector = is_vector_op (&src), ismax = false, num = false;
+	int lanes = vector? vas_count (src.vas): 1, esize = vector? vector_size (&src): REGSIZE64 (1) * 8;
+	int i;
+	switch (insn->id) {
+	case ARM64_INS_FMAX:
+		ismax = true;
+		break;
+	case ARM64_INS_FMINNM:
+		num = true;
+		break;
+	case ARM64_INS_FMAXNM:
+		ismax = true;
+		num = true;
+		break;
+	default:
+		break;
+	}
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b, combined;
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		r_strbuf_init (&combined);
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		VECARG64_APPEND (&lane_b, 2, i, 0);
+		arm64_esil_minmax_expr (&combined, esize, ismax, num, r_strbuf_get (&lane_a), r_strbuf_get (&lane_b));
+		r_strbuf_append (&op->esil, r_strbuf_get (&combined));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		r_strbuf_fini (&combined);
+	}
+}
+
 // narrowing/widening fp lane pairs for fcvtn/fcvtn2/fcvtl/fcvtl2
 static void arm64_esil_vec_fcvtnl(RAnalOp *op, csh *handle, cs_insn *insn) {
 	bool upper = false, narrow = false;
@@ -2600,10 +2792,16 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_CMEQ:
 	case ARM64_INS_CMGE:
 	case ARM64_INS_CMGT:
+	case ARM64_INS_CMHI:
+	case ARM64_INS_CMHS:
 	case ARM64_INS_CMLE:
 	case ARM64_INS_CMLT:
-		// zero forms only; the register forms compare two vectors
+	case ARM64_INS_CMTST:
+		// cmle/cmlt only have the zero forms, cmtst only the register form
 		if (insn->detail->arm64.op_count > 2 && is_vector_op (&INSOP64 (0))
+			&& is_vector_op (&INSOP64 (1)) && is_vector_op (&INSOP64 (2))) {
+			arm64_esil_vec_cmpreg (op, handle, insn);
+		} else if (insn->detail->arm64.op_count > 2 && is_vector_op (&INSOP64 (0))
 			&& is_vector_op (&INSOP64 (1)) && ISIMM64 (2) && !IMM64 (2)) {
 			arm64_esil_vec_cmpzero (op, handle, insn);
 		}
@@ -2617,6 +2815,9 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		cs_arm64_op src = INSOP64 (1);
 		int esize = is_vector_op (&src)? vector_size (&src): REGSIZE64 (1) * 8;
 		if (insn->detail->arm64.op_count > 2 && ISREG64 (0) && ISREG64 (1)
+			&& ISREG64 (2) && (esize == 32 || esize == 64)) {
+			arm64_esil_vec_cmpreg (op, handle, insn);
+		} else if (insn->detail->arm64.op_count > 2 && ISREG64 (0) && ISREG64 (1)
 			&& ISIMM64 (2) && !IMM64 (2) && (esize == 32 || esize == 64)) {
 			arm64_esil_vec_cmpzero (op, handle, insn);
 		}
@@ -2733,15 +2934,18 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		break;
 	}
 	case ARM64_INS_FMIN:
-		r_strbuf_setf (&op->esil, "%d,%s,F2D,%d,%s,F2D,F<,?{,%s,}{,%s,},%s,=",
-			REGBITS64 (2), REG64 (2),
-			REGBITS64 (1), REG64 (1), REG64 (1), REG64 (2), REG64 (0));
-		break;
 	case ARM64_INS_FMAX:
-		r_strbuf_setf (&op->esil, "%d,%s,F2D,%d,%s,F2D,F<,!,?{,%s,}{,%s,},%s,=",
-			REGBITS64 (2), REG64 (2),
-			REGBITS64 (1), REG64 (1), REG64 (1), REG64 (2), REG64 (0));
+	case ARM64_INS_FMINNM:
+	case ARM64_INS_FMAXNM:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		int esize = is_vector_op (&src)? vector_size (&src): REGSIZE64 (1) * 8;
+		if (insn->detail->arm64.op_count > 2 && ISREG64 (0) && ISREG64 (1)
+			&& ISREG64 (2) && (esize == 32 || esize == 64)) {
+			arm64_esil_vec_minmax (op, handle, insn);
+		}
 		break;
+	}
 	case ARM64_INS_FADD:
 		FPOPCALL ("+");
 		break;
@@ -5003,8 +5207,11 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_CMEQ:
 	case ARM64_INS_CMGE:
 	case ARM64_INS_CMGT:
+	case ARM64_INS_CMHI:
+	case ARM64_INS_CMHS:
 	case ARM64_INS_CMLE:
 	case ARM64_INS_CMLT:
+	case ARM64_INS_CMTST:
 	case ARM64_INS_FCMEQ:
 	case ARM64_INS_FCMGE:
 	case ARM64_INS_FCMGT:

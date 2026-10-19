@@ -4933,3 +4933,380 @@ EXPECT=<<EOF
 0x00000000
 EOF
 RUN
+
+NAME=arm64 ESIL integer register-form vector compares
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 208c226e # cmeq v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v1l=0x00ff00ff00ff00ff
+aer v1h=0x00ff00ff00ff00ff
+aer v2l=0xff00ff00ff00ff00
+aer v2h=0xffff0000ffff0000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 203ca24e @ 0 # cmge v0.4s, v1.4s, v2.4s
+aeip
+aer v1l=0xffffffff00000002
+aer v1h=0x0000000100000000
+aer v2l=0x0000000000000002
+aer v2h=0x0000000280000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 2034624e @ 0 # cmgt v0.8h, v1.8h, v2.8h
+aeip
+aer v1l=0x7fff00000001ffff
+aer v1h=0x00010000ffff8000
+aer v2l=0x7fffffff00010000
+aer v2h=0xffff000100008000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 203ca20e @ 0 # cmge v0.2s, v1.2s, v2.2s keeps the upper bits zeroed
+aeip
+aer v1l=0xffffffff00000002
+aer v2l=0x0000000200000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00000000
+0xffff0000ffff00
+0xffffffff
+0xffffffff
+0xffff00000000
+0xffff000000000000
+0xffffffff
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL unsigned vector compares cmhi cmhs cmtst
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2034e26e # cmhi v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0xffffffffffffffff
+aer v1h=0x1
+aer v2l=0x7fffffffffffffff
+aer v2h=0x1
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 203ca26e @ 0 # cmhs v0.4s, v1.4s, v2.4s with lanes crossing the sign bit
+aeip
+aer v1l=0x80000000ffffffff
+aer v1h=0x0000000000000005
+aer v2l=0x7fffffffffffffff
+aer v2h=0x0000000100000004
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 208ca24e @ 0 # cmtst v0.4s, v1.4s, v2.4s
+aeip
+aer v1l=0xf00000000000000f
+aer v1h=0x1234567880000000
+aer v2l=0x0000000ff0000000
+aer v2h=0x123456787fffffff
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffffffffffff
+0x00000000
+0xffffffffffffffff
+0xffffffff
+0x00000000
+0xffffffff00000000
+EOF
+RUN
+
+NAME=arm64 ESIL fp register-form vector compares
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20e4224e # fcmeq v0.4s, v1.4s, v2.4s with zeros and a nan
+aei
+aeip
+aer v1l=0x8000000000000000
+aer v1h=0x7fc000003f800000
+aer v2l=0x0
+aer v2h=0x7fc0000040000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20e4626e @ 0 # fcmge v0.2d, v1.2d, v2.2d with infinities
+aeip
+aer v1l=0x7ff0000000000000
+aer v1h=0x3ff0000000000000
+aer v2l=0xfff0000000000000
+aer v2h=0x4000000000000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20e4a26e @ 0 # fcmgt v0.4s, v1.4s, v2.4s
+aeip
+aer v1l=0x400000003f800000
+aer v1h=0x7f80000080000000
+aer v2l=0x3f80000040000000
+aer v2h=0x000000007f800000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffffffffffff
+0x00000000
+0xffffffffffffffff
+0x00000000
+0xffffffff00000000
+0xffffffff00000000
+EOF
+RUN
+
+NAME=arm64 ESIL scalar fp register-form compares use the s and d views
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20e4a27e # fcmgt s0, s1, s2 with +inf against 2.0
+aei
+aeip
+aer v1l=0x7f800000
+aer v2l=0x40000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20e4227e @ 0 # fcmge s0, s1, s2 between negative and positive zero
+aeip
+aer v1l=0x80000000
+aer v2l=0x0
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20e4625e @ 0 # fcmeq d0, d1, d2 between two nans is false
+aeip
+aer v1l=0x7ff8000000000000
+aer v2l=0x7ff8000000000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffff
+0x00000000
+0xffffffff
+0x00000000
+0x00000000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL fmin fmax vector select the smaller or larger lane
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20f4a24e # fmin v0.4s, v1.4s, v2.4s with an inf and a nan lane
+aei
+aeip
+aer v1l=0x400000003f800000
+aer v1h=0x7fc000007f800000
+aer v2l=0x3f80000040000000
+aer v2h=0x3f80000040400000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20f4224e @ 0 # fmax v0.4s, v1.4s, v2.4s with signed zeros and infinities
+aeip
+aer v1l=0x0000000080000000
+aer v1h=0xff800000c0a00000
+aer v2l=0x8000000000000000
+aer v2h=0xbf80000040000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20f4a24e @ 0 # fmin keeps the sign shared by a +/-0 pair as -0.0
+aeip
+aer v1l=0x0000000080000000
+aer v1h=0x0
+aer v2l=0x8000000000000000
+aer v2h=0x0
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20f4a20e @ 0 # fmin v0.2s, v1.2s, v2.2s keeps the upper bits zeroed
+aeip
+aer v1l=0xff8000003f800000
+aer v2l=0x0000000040000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x3f8000003f800000
+0x7fc0000040400000
+0x00000000
+0xbf80000040000000
+0x8000000080000000
+0x00000000
+0xff8000003f800000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL fminnm fmaxnm drop lone quiet nans for the other operand
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20c4a24e # fminnm v0.4s, v1.4s, v2.4s with quiet and signaling nans
+aei
+aeip
+aer v1l=0x400000007fc00000
+aer v1h=0x7f8000017fc00000
+aer v2l=0x7fc000003f800000
+aer v2h=0x3f8000007fc00000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20c4a24e @ 0 # fminnm against a signaling nan keeps it quieted
+aeip
+aer v1l=0x7f8000027fc00000
+aer v1h=0x3f800000c0000000
+aer v2l=0x7fc000007f800001
+aer v2h=0x40000000bf800000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20c4224e @ 0 # fmaxnm v0.4s, v1.4s, v2.4s
+aeip
+aer v1l=0x400000007fc00000
+aer v1h=0x800000007f800001
+aer v2l=0x7fc000003f800000
+aer v2h=0x0000000040400000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 20c4e24e @ 0 # fminnm v0.2d, v1.2d, v2.2d keeps -0.0 for a zero pair
+aeip
+aer v1l=0xbff0000000000000
+aer v1h=0x8000000000000000
+aer v2l=0x3ff0000000000000
+aer v2h=0x8000000000000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x400000003f800000
+0x7fc000017fc00000
+0x7fc000027fc00001
+0x3f800000c0000000
+0x400000003f800000
+0x7fc00001
+0xbff0000000000000
+0x8000000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL scalar fmin fmax fminnm fmaxnm follow the vector rules
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2058221e # fmin s0, s1, s2 propagates a signaling nan quieted
+aei
+aeip
+aer v1l=0x7f800001
+aer v2l=0x3f800000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 2048621e @ 0 # fmax d0, d1, d2 selects the larger operand
+aeip
+aer v1l=0x3ff0000000000000
+aer v2l=0x4000000000000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 2078221e @ 0 # fminnm s0, s1, s2 drops a lone quiet nan
+aeip
+aer v1l=0x7fc00000
+aer v2l=0x40000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+wx 2068621e @ 0 # fmaxnm d0, d1, d2 between a quiet nan and -inf
+aeip
+aer v1l=0x7ff8000000000000
+aer v2l=0xfff0000000000000
+aer v0l=0x1111111111111111
+aer v0h=0xdeadbeefdeadbeef
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x7fc00001
+0x00000000
+0x4000000000000000
+0x00000000
+0x40000000
+0x00000000
+0xfff0000000000000
+0x00000000
+EOF
+RUN
