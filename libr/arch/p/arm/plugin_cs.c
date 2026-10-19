@@ -1923,6 +1923,54 @@ static void arm64_esil_vec_shift_reg(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// widening shift left long; destination lanes are twice as wide as the
+// source lanes and the 2 forms read the upper half of the source register
+static void arm64_esil_vec_shll(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst = INSOP64 (0);
+	int lanes = vas_count (dst.vas);
+	bool upper = false, sgn = false;
+	int src_bits, up, amount, i;
+	switch (insn->id) {
+	case ARM64_INS_SSHLL:
+		sgn = true;
+		break;
+	case ARM64_INS_SSHLL2:
+		sgn = true;
+		upper = true;
+		break;
+	case ARM64_INS_USHLL:
+		break;
+	case ARM64_INS_USHLL2:
+		upper = true;
+		break;
+	default:
+		break;
+	}
+	src_bits = vector_size (&INSOP64 (1));
+	up = 64 - src_bits;
+	amount = IMM64 (2);
+	for (i = 0; i < lanes; i++) {
+		int src_i;
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		src_i = upper? i + lanes: i;
+		if (sgn) {
+			// sign-extend the narrow lane before shifting so the sign bits
+			// spread across the widened lane (SInt(opelt) << shift)
+			r_strbuf_appendf (&op->esil, "%d,%d,%d,", amount, up, up);
+			VECARG64_APPEND (&op->esil, 1, src_i, 0);
+			r_strbuf_append (&op->esil, ",<<,ASR,<<,");
+		} else {
+			r_strbuf_appendf (&op->esil, "%d,", amount);
+			VECARG64_APPEND (&op->esil, 1, src_i, 0);
+			r_strbuf_append (&op->esil, ",<<,");
+		}
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+	}
+}
+
 // per-lane shifts by #imm
 static void arm64_esil_vec_shift(RAnalOp *op, csh *handle, cs_insn *insn, int amount) {
 	cs_arm64_op src = INSOP64 (1);
@@ -3113,6 +3161,17 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 			arm64_esil_vec_shift_reg (op, handle, insn);
 		}
 		// SVE predicated forms stay unemulated
+		break;
+	}
+	case ARM64_INS_SSHLL:
+	case ARM64_INS_SSHLL2:
+	case ARM64_INS_USHLL:
+	case ARM64_INS_USHLL2:
+	{
+		cs_arm64_op dst = INSOP64 (0);
+		if (is_vector_op (&dst) && is_vector_op (&INSOP64 (1)) && ISIMM64 (2)) {
+			arm64_esil_vec_shll (op, handle, insn);
+		}
 		break;
 	}
 	case ARM64_INS_RBIT:
@@ -4665,7 +4724,10 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		op->cycles = 1;
 		/* fallthru */
 	case ARM64_INS_SHL:
+	case ARM64_INS_SSHLL:
+	case ARM64_INS_SSHLL2:
 	case ARM64_INS_USHLL:
+	case ARM64_INS_USHLL2:
 		op->type = R_ANAL_OP_TYPE_SHL;
 		break;
 	case ARM64_INS_LSR:

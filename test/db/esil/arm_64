@@ -4333,3 +4333,156 @@ EXPECT=<<EOF
 0x00000000
 EOF
 RUN
+
+NAME=arm64 ESIL vector SSHLL sign-extends narrow bytes into halfwords
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a40f0f # sshll v0.8h, v1.8b, #7
+aei
+aeip
+aer v1l=0x01ff7f81
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x80ff803f80c080
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SSHLL widens words to doublewords with the sign spread
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a43f0f # sshll v0.2d, v1.2s, #31
+aei
+aeip
+aer v1l=0x00000001ffffffff
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffffff80000000
+0x80000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SSHLL2 reads the upper half of the source
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a4184f # sshll2 v0.4s, v1.8h, #8
+aei
+aeip
+aer v1h=0x01020304ffff8000
+aer v0l=0xffffffffffffffff
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffffff00ff800000
+0x1020000030400
+EOF
+RUN
+
+NAME=arm64 ESIL vector SSHLL2 widens upper bytes with rounding-free shift
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a4094f # sshll2 v0.8h, v1.16b, #1
+aei
+aeip
+aer v1h=0x00000000ff7f02ff
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xfffe00fe0004fffe
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector USHLL zero-extends bytes into halfwords
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a40f2f # ushll v0.8h, v1.8b, #7
+aei
+aeip
+aer v1l=0x01ff7f81
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x807f803f804080
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector USHLL keeps full source width before shifting
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a41f2f # ushll v0.4s, v1.4h, #15
+aei
+aeip
+aer v1l=0x000000018000ffff
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x400000007fff8000
+0x00008000
+EOF
+RUN
+
+NAME=arm64 ESIL vector USHLL2 widens upper words past the source width
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a43f6f # ushll2 v0.2d, v1.4s, #31
+aei
+aeip
+aer v1h=0x80000000ffffffff
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x7fffffff80000000
+0x4000000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SXTL alias sign-extends with zero shift
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20a4080f # sxtl v0.8h, v1.8b
+aei
+aeip
+aer v1l=0x7fff0180
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x7fffff0001ff80
+0x00000000
+EOF
+RUN
