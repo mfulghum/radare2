@@ -1796,6 +1796,50 @@ static void arm64_esil_vec_fcvtnl(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// per-lane shifts by #imm
+static void arm64_esil_vec_shift(RAnalOp *op, csh *handle, cs_insn *insn, int amount) {
+	cs_arm64_op src = INSOP64 (1);
+	int lanes = vas_count (src.vas);
+	int lane_bits = vector_size (&src);
+	ut64 mask = bitmask_by_width[lane_bits - 1];
+	int i;
+	for (i = 0; i < lanes; i++) {
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		switch (insn->id) {
+		case ARM64_INS_SHL:
+			r_strbuf_appendf (&op->esil, "%d,", amount);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",<<,0x%" PFMT64x ",&,", (ut64)mask);
+			break;
+		case ARM64_INS_USHR:
+			r_strbuf_appendf (&op->esil, "%d,", amount);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_append (&op->esil, ",>>,");
+			break;
+		case ARM64_INS_SSHR:
+			// left-align the lane so its sign bit lands on bit 63 and ASR
+			// replicates it; the total shift covers the #imm as well
+			r_strbuf_appendf (&op->esil, "%d,%d,", 64 - lane_bits + amount, 64 - lane_bits);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",<<,ASR,0x%" PFMT64x ",&,", (ut64)mask);
+			break;
+		case ARM64_INS_SQSHLU:
+			// overflow iff a bit above lane_bits-amount survives the right
+			// shift; the all-ones mask then saturates the left shift
+			r_strbuf_appendf (&op->esil, "%d,", lane_bits - amount);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",>>,!,!,0,-,DUP,%d,", amount);
+			VECARG64_APPEND (&op->esil, 1, i, 0);
+			r_strbuf_appendf (&op->esil, ",<<,0x%" PFMT64x ",&,^,|,", (ut64)mask);
+			break;
+		}
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+	}
+}
+
 static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh *handle, cs_insn *insn) {
 	r_strbuf_init (&op->esil);
 	r_strbuf_set (&op->esil, "");
@@ -2893,6 +2937,18 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		r_strbuf_setf (&op->esil, "%" PFMT64d ",%s,>>,%d,%s,<<,|,%s,=",
 			IMM64 (3), REG64 (2), (int)(REGBITS64 (1) - IMM64 (3)), REG64 (1), REG64 (0));
 		break;
+	case ARM64_INS_SHL:
+	case ARM64_INS_SSHR:
+	case ARM64_INS_USHR:
+	case ARM64_INS_SQSHLU:
+	{
+		cs_arm64_op src = INSOP64 (1);
+		if (is_vector_op (&src) && is_vector_op (&INSOP64 (0)) && ISIMM64 (2)) {
+			arm64_esil_vec_shift (op, handle, insn, IMM64 (2));
+		}
+		// SVE predicate forms and anything unexpected stay unemulated
+		break;
+	}
 	case ARM64_INS_RBIT:
 	{
 		cs_arm64_op src = INSOP64 (1);

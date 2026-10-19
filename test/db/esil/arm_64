@@ -3870,3 +3870,116 @@ EXPECT=<<EOF
 0x3ff8000000000000
 EOF
 RUN
+
+NAME=arm64 ESIL vector SHL shifts bytes left
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20540b4f # shl v0.16b, v1.16b, #3
+aei
+aeip
+aer v1l=0xf0f0f0f0f0f0f0f0
+aer v1h=0x0102030405060708
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x8080808080808080
+0x810182028303840
+EOF
+RUN
+
+NAME=arm64 ESIL vector SSHR sign-extends each lane
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 20043b4f # sshr v0.4s, v1.4s, #5
+aei
+aeip
+aer v1l=0x7fffffff80000000
+aer v1h=0x00000400ffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x3fffffffc000000
+0x20ffffffff
+EOF
+RUN
+
+NAME=arm64 ESIL vector SSHR full-width fills lane with sign
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2004080f # sshr v0.8b, v1.8b, #8
+aei
+aeip
+aer v1l=0xaa55807f00ff8101
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xff00ff0000ffff00
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector USHR shifts lanes right
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2004796f # ushr v0.2d, v1.2d, #7
+aei
+aeip
+aer v1l=0x80000000000000ff
+aer v1h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x100000000000001
+0x1ffffffffffffff
+EOF
+RUN
+
+NAME=arm64 ESIL vector USHR D-form zeroes upper half
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2004082f # ushr v0.8b, v1.8b, #8
+aei
+aeip
+aer v1l=0x0102030405060708
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00000000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL vector SQSHLU saturates overflowing lanes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+wx 2064132f # sqshlu v0.4h, v1.4h, #3
+aei
+aeip
+aer v1l=0x1fffffff20000010
+aer v0h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xfff8ffffffff0080
+0x00000000
+EOF
+RUN
