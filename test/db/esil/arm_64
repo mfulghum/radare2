@@ -6691,7 +6691,7 @@ EXPECT=<<EOF
 0x00000000
 0xc0200000
 0x00000000
-0x7fc00000
+0x7fe00002
 0x00000000
 0x7fe55555
 0x00000000
@@ -6731,7 +6731,7 @@ EOF
 EXPECT=<<EOF
 0x40400000
 0x00000000
-0x7fc00000
+0x7fe00001
 0x00000000
 EOF
 RUN
@@ -6813,5 +6813,886 @@ EXPECT=<<EOF
 0x4600cefffffffd
 0x1fffdffffffff
 0x2000000020001
+EOF
+RUN
+NAME=arm64 ESIL fmla fmls accumulate fp products with nan and inf classes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20cc224e # fmla v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x4040000040000000
+aer v1h=0x3f000000bfc00000
+aer v2l=0x4000000040400000
+aer v2h=0xc080000040800000
+aer v0l=0xbe8000003f800000
+aer v0h=0x0000000041000000
+aes
+aer v0l
+aer v0h
+wx 20cc224e # fmla v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x0000000000000000
+aer v1h=0x7f80000080000000
+aer v2l=0x0000000080000000
+aer v2h=0x4040000040000000
+aer v0l=0x0000000080000000
+aer v0h=0x3f80000000000000
+aes
+aer v0l
+aer v0h
+wx 20cc224e # fmla v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x7f8000007f800000
+aer v1h=0x7149f2caff800000
+aer v2l=0x4000000040000000
+aer v2h=0x7149f2ca40400000
+aer v0l=0xff8000007f800000
+aer v0h=0x000000007f800000
+aes
+aer v0l
+aer v0h
+wx 20cc224e # fmla v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x400000007fc00001
+aer v1h=0x7fc1000140000000
+aer v2l=0x7f80000240000000
+aer v2h=0x7fc2000240400000
+aer v0l=0x4040000040400000
+aer v0h=0x404000007f900003
+aes
+aer v0l
+aer v0h
+wx 20cc224e # fmla v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x7f8000007fc00001
+aer v1h=0x7fc0000100000000
+aer v2l=0x0000000040000000
+aer v2h=0x7f8000027f800000
+aer v0l=0x7fc300037fc30003
+aer v0h=0x7fc300037f900003
+aes
+aer v0l
+aer v0h
+wx 20cca24e # fmls v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x4040000040000000
+aer v1h=0x3f000000bfc00000
+aer v2l=0x4000000040400000
+aer v2h=0xc080000040800000
+aer v0l=0xbe8000003f800000
+aer v0h=0x0000000041000000
+aes
+aer v0l
+aer v0h
+wx 20cca24e # fmls v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x400000007fc00001
+aer v1h=0x800000007149f2ca
+aer v2l=0x7f80000240000000
+aer v2h=0x400000007149f2ca
+aer v0l=0x3f8000003f800000
+aer v0h=0x7f80000000000000
+aes
+aer v0l
+aer v0h
+wx 20cc624e # fmla v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x4000000000000000
+aer v1h=0x7fe1ccf385ebc8a0
+aer v2l=0x4008000000000000
+aer v2h=0x7fe1ccf385ebc8a0
+aer v0l=0x3ff0000000000000
+aer v0h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 20cc624e # fmla v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x7fe1ccf385ebc8a0
+aer v1h=0x7fe1ccf385ebc8a0
+aer v2l=0x7fe1ccf385ebc8a0
+aer v2h=0x7fe1ccf385ebc8a0
+aer v0l=0xc014000000000000
+aer v0h=0x7ff0000000000000
+aes
+aer v0l
+aer v0h
+wx 20cc624e # fmla v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x7ff8000000000001
+aer v1h=0x4000000000000000
+aer v2l=0x4000000000000000
+aer v2h=0x7ff0000000000002
+aer v0l=0x4008000000000000
+aer v0h=0x4008000000000000
+aes
+aer v0l
+aer v0h
+wx 2010a24f # fmla v0.4s, v1.4s, v2.s[1]
+aei
+aeip
+aer v1l=0x4040000040000000
+aer v1h=0x3f000000bfc00000
+aer v2l=0x0000000000000000
+aer v2h=0x0000000000000000
+aer v0l=0x000000003f800000
+aer v0h=0xc000000041000000
+aes
+aer v0l
+aer v0h
+wx 2018a24f # fmla v0.4s, v1.4s, v2.s[3]
+aei
+aeip
+aer v1l=0x4040000040000000
+aer v1h=0x3f000000bfc00000
+aer v2l=0x0000000000000000
+aer v2h=0x0000000000000000
+aer v0l=0x000000003f800000
+aer v0h=0xc000000041000000
+aes
+aer v0l
+aer v0h
+wx 2058c24f # fmls v0.2d, v1.2d, v2.d[1]
+aei
+aeip
+aer v1l=0x4000000000000000
+aer v1h=0x4008000000000000
+aer v2l=0x0000000000000000
+aer v2h=0x0000000000000000
+aer v0l=0x3ff0000000000000
+aer v0h=0xbfd0000000000000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x40b8000040e00000
+0xc000000040000000
+0x80000000
+0x7f80000000000000
+0x7fc000007f800000
+0x7f8000007fc00000
+0x7fc000027fc00001
+0x7fc100017fd00003
+0x7fc000007fc30003
+0x7fc000027fd00003
+0xc0c80000c0a00000
+0x4000000041600000
+0x7fc00002ffc00001
+0x7f800000ff800000
+0x401c000000000000
+0x7ff0000000000000
+0x7ff0000000000000
+0x7ff0000000000000
+0x7ff8000000000001
+0x7ff8000000000002
+0x3f800000
+0xc000000041000000
+0x3f800000
+0xc000000041000000
+0x3ff0000000000000
+0xbfd0000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL fmaxp fminp fmaxnmp fminnmp pairwise fp minima and maxima
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20f4226e # fmaxp v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x4040000040000000
+aer v1h=0xbfc00000bfc00000
+aer v2l=0x0000000000000000
+aer v2h=0x0000000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f4226e # fmaxp v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x4040000040000000
+aer v1h=0x8000000000000000
+aer v2l=0xbfc00000bfc00000
+aer v2h=0x40a000007f800000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f4226e # fmaxp v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x400000007fc00001
+aer v1h=0x7f8000027fc10001
+aer v2l=0x0000000000000000
+aer v2h=0x000000007fc20002
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f4e26e # fminp v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x4000000000000000
+aer v1h=0x0000000000000000
+aer v2l=0x0000000000000000
+aer v2h=0x0000000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f4e26e # fminp v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x4000000000000000
+aer v1h=0x8000000000000000
+aer v2l=0x4008000000000000
+aer v2h=0x0000000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f4e26e # fminp v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x7ff0000000000002
+aer v1h=0x3ff0000000000000
+aer v2l=0x0000000000000000
+aer v2h=0x0000000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20c4226e # fmaxnmp v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x400000007fc00001
+aer v1h=0x7f8000027fc10001
+aer v2l=0x0000000000000000
+aer v2h=0x000000007fc20002
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20c4226e # fmaxnmp v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x4040000040000000
+aer v1h=0x8000000000000000
+aer v2l=0xbfc00000bfc00000
+aer v2h=0x40a000007f800000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20c4e26e # fminnmp v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x7ff8000000000001
+aer v1h=0x4000000000000000
+aer v2l=0x0000000000000000
+aer v2h=0x0000000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xbfc0000040400000
+0x00000000
+0x40400000
+0x7f800000bfc00000
+0x7fc000027fc00001
+0x7fc2000200000000
+0x00000000
+0x00000000
+0x8000000000000000
+0x00000000
+0x7ff8000000000002
+0x00000000
+0x7fc0000240000000
+0x00000000
+0x40400000
+0x7f800000bfc00000
+0x4000000000000000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL fsqrt square roots fp lanes and scalars
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20f8a16e # fsqrt v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x4110000040800000
+aer v1h=0x418000003e800000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8a16e # fsqrt v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x8000000000000000
+aer v1h=0xff8000007f800000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8a16e # fsqrt v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x7f8000027fc00001
+aer v1h=0x0000000180400001
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8e16e # fsqrt v0.2d, v1.2d
+aei
+aeip
+aer v1l=0x4010000000000000
+aer v1h=0x3fe0000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8e16e # fsqrt v0.2d, v1.2d
+aei
+aeip
+aer v1l=0x7ff0000000000000
+aer v1h=0xfff0000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20c0211e # fsqrt s0, s1
+aei
+aeip
+aer v1l=0x0000000040100000
+aer v1h=0x0000000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20c0611e # fsqrt d0, d1
+aei
+aeip
+aer v1l=0x3e45798ee2308c3a
+aer v1h=0x0000000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x4040000040000000
+0x408000003f000000
+0x8000000000000000
+0x7fc000007f800000
+0x7fc000027fc00001
+0x1a3504f37fc00000
+0x4000000000000000
+0x3fe6a09e667f3bcd
+0x7ff0000000000000
+0x7ff8000000000000
+0x3fc00000
+0x00000000
+0x3f1a36e2eb1c432d
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL frecpe frsqrte estimate via newton-raphson
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20d8a14e # frecpe v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x400000003f800000
+aer v1h=0xbf40000040600000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8a14e # frecpe v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x8000000000000000
+aer v1h=0xff8000007f800000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8a14e # frecpe v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x7f8000027fc00001
+aer v1h=0x7f70000000000001
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8e14e # frecpe v0.2d, v1.2d
+aei
+aeip
+aer v1l=0x3ff0000000000000
+aer v1h=0xc01d000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8e14e # frecpe v0.2d, v1.2d
+aei
+aeip
+aer v1l=0x7fefffffffffffff
+aer v1h=0x0000000000000001
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8a15e # frecpe s0, s1
+aei
+aeip
+aer v1l=0x000000003f000000
+aer v1h=0x0000000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8a16e # frsqrte v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x3e80000040800000
+aer v1h=0xbfc0000040000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8a16e # frsqrte v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x8000000000000000
+aer v1h=0xff8000007f800000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8a16e # frsqrte v0.4s, v1.4s
+aei
+aeip
+aer v1l=0x7f8000027fc00001
+aer v1h=0x8040000100000001
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8e16e # frsqrte v0.2d, v1.2d
+aei
+aeip
+aer v1l=0x4022000000000000
+aer v1h=0x7e37e43c8800759c
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8a17e # frsqrte s0, s1
+aei
+aeip
+aer v1l=0x000000003f000000
+aer v1h=0x0000000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x3f0000003f800000
+0xbfaaaaab3e924925
+0xff8000007f800000
+0x8000000000000000
+0x7fc000027fc00001
+0x2222227f800000
+0x3fefffffffffffff
+0xbfc1a7b9611a7b96
+0x4000000000000
+0x7ff0000000000000
+0x40000000
+0x00000000
+0x400000003f000000
+0x7fc000003f3504f3
+0xff8000007f800000
+0x7fc0000000000000
+0x7fc000027fc00001
+0x7fc0000064b504f3
+0x3fd5555555555555
+0x20ca2fe76a3f9475
+0x3fb504f3
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL frecps frsqrts one newton-raphson step
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20fc224e # frecps v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x400000003f800000
+aer v1h=0x7149f2ca7149f2ca
+aer v2l=0xbf0000003fc00000
+aer v2h=0xf149f2ca7149f2ca
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20fc224e # frecps v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x000000007f800000
+aer v1h=0x7f80000040000000
+aer v2l=0x7f80000000000000
+aer v2h=0x7f8000007f800000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20fc224e # frecps v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x400000007fc00001
+aer v1h=0x7fc100017f800002
+aer v2l=0x7f80000240000000
+aer v2h=0x7fc2000240000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20fc624e # frecps v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v1l=0x3ff4000000000000
+aer v1h=0x7fe1ccf385ebc8a0
+aer v2l=0x3fe0000000000000
+aer v2h=0x7fe1ccf385ebc8a0
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20fc225e # frecps s0, s1, s2
+aei
+aeip
+aer v1l=0x000000003f800000
+aer v1h=0x0000000000000000
+aer v2l=0x000000003fc00000
+aer v2h=0x0000000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20fca24e # frsqrts v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x400000003f800000
+aer v1h=0x7f8000007149f2ca
+aer v2l=0x3f40000040000000
+aer v2h=0x000000007149f2ca
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20fca24e # frsqrts v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x000000007f800000
+aer v1h=0xc00000007f800000
+aer v2l=0x7f80000000000000
+aer v2h=0x7f8000007f800000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20fca25e # frsqrts s0, s1, s2
+aei
+aeip
+aer v1l=0x0000000040000000
+aer v1h=0x0000000000000000
+aer v2l=0x000000003f000000
+aer v2h=0x0000000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x404000003f000000
+0x7f800000ff800000
+0x4000000040000000
+0xff800000ff800000
+0x7fc00002ffc00001
+0xffc10001ffc00002
+0x3ff6000000000000
+0xfff0000000000000
+0x3f000000
+0x00000000
+0x3f4000003f000000
+0x3fc00000ff800000
+0x3fc000003fc00000
+0x7f800000ff800000
+0x3f800000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL fmulx multiplies without invalid on inf times zero
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20dc224e # fmulx v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0xbfc0000040000000
+aer v1h=0x000000007f800000
+aer v2l=0x4080000040400000
+aer v2h=0x7f80000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20dc224e # fmulx v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x0000000000000000
+aer v1h=0x7149f2ca7f800000
+aer v2l=0x0000000080000000
+aer v2h=0x7149f2caff800000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20dc224e # fmulx v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x400000007fc00001
+aer v1h=0x7fc100017f800002
+aer v2l=0x7f80000240000000
+aer v2h=0x7fc2000240000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20dc225e # fmulx s0, s1, s2
+aei
+aeip
+aer v1l=0x00000000c0000000
+aer v1h=0x0000000000000000
+aer v2l=0x0000000040400000
+aer v2h=0x0000000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 2090a26f # fmulx v0.4s, v1.4s, v2.s[1]
+aei
+aeip
+aer v1l=0x4040000040000000
+aer v1h=0x00000000bfc00000
+aer v2l=0x4000000000000000
+aer v2h=0x0000000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xc0c0000040c00000
+0x4000000040000000
+0x80000000
+0x7f800000ff800000
+0x7fc000027fc00001
+0x7fc100017fc00002
+0xc0c00000
+0x00000000
+0x40c0000040800000
+0xc0400000
+EOF
+RUN
+
+NAME=arm64 ESIL frecpx mirrors the biased exponent
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20f8a15e # frecpx s0, s1
+aei
+aeip
+aer v1l=0x000000003fc00000
+aer v1h=0x0000000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8a15e # frecpx s0, s1
+aei
+aeip
+aer v1l=0x0000000000000000
+aer v1h=0x0000000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8a15e # frecpx s0, s1
+aei
+aeip
+aer v1l=0x0000000000000001
+aer v1h=0x0000000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8a15e # frecpx s0, s1
+aei
+aeip
+aer v1l=0x000000007f800000
+aer v1h=0x0000000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8a15e # frecpx s0, s1
+aei
+aeip
+aer v1l=0x000000007fc00001
+aer v1h=0x0000000000000000
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x40000000
+0x00000000
+0x7f000000
+0x00000000
+0x7f000000
+0x00000000
+0x00000000
+0x00000000
+0x7fc00001
+0x00000000
 EOF
 RUN

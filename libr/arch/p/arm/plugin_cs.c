@@ -1910,6 +1910,85 @@ static void arm64_esil_vec_cmpreg(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// value expression implementing FPProcessNaNs for the lane bit strings a
+// and b: a signaling NaN wins with its payload quieted by the quiet bit,
+// otherwise the first quiet NaN operand keeps its bits; aneg negates operand
+// a first, as the fused reciprocal steps do before processing NaNs
+static void arm64_esil_fp_propnans(RStrBuf *out, int esize, const char *a, const char *b,
+	bool aneg) {
+	const ut64 nanc = (esize == 32)? 0x7fc00000ULL: 0x7ff8000000000000ULL;
+	const ut64 qbit = (esize == 32)? 0x00400000ULL: 0x0008000000000000ULL;
+	const ut64 signlane = 1ULL << (esize - 1);
+	RStrBuf nan_a, nan_b, qnan_a, qnan_b, snan_a, snan_b, a_quieted, a_value;
+	const char *is_nan_a, *is_nan_b, *is_qnan_a, *is_qnan_b, *is_snan_a, *is_snan_b;
+	const char *a_quiet, *a_bits;
+	r_strbuf_init (&nan_a);
+	r_strbuf_init (&nan_b);
+	r_strbuf_init (&qnan_a);
+	r_strbuf_init (&qnan_b);
+	r_strbuf_init (&snan_a);
+	r_strbuf_init (&snan_b);
+	r_strbuf_init (&a_quieted);
+	r_strbuf_init (&a_value);
+	r_strbuf_setf (&nan_a, "%d,%s,F2D,DUP,F==,!", esize, a);
+	r_strbuf_setf (&nan_b, "%d,%s,F2D,DUP,F==,!", esize, b);
+	is_nan_a = r_strbuf_get (&nan_a);
+	is_nan_b = r_strbuf_get (&nan_b);
+	r_strbuf_setf (&qnan_a, "%s,0x%" PFMT64x ",%s,&,!,!,&", is_nan_a, qbit, a);
+	r_strbuf_setf (&qnan_b, "%s,0x%" PFMT64x ",%s,&,!,!,&", is_nan_b, qbit, b);
+	is_qnan_a = r_strbuf_get (&qnan_a);
+	is_qnan_b = r_strbuf_get (&qnan_b);
+	r_strbuf_setf (&snan_a, "%s,%s,-", is_nan_a, is_qnan_a);
+	r_strbuf_setf (&snan_b, "%s,%s,-", is_nan_b, is_qnan_b);
+	is_snan_a = r_strbuf_get (&snan_a);
+	is_snan_b = r_strbuf_get (&snan_b);
+	if (aneg) {
+		r_strbuf_setf (&a_quieted, "%s,0x%" PFMT64x ",^,0x%" PFMT64x ",|", a, signlane, qbit);
+		r_strbuf_setf (&a_value, "%s,0x%" PFMT64x ",^", a, signlane);
+	} else {
+		r_strbuf_setf (&a_quieted, "%s,0x%" PFMT64x ",|", a, qbit);
+		r_strbuf_setf (&a_value, "%s", a);
+	}
+	a_quiet = r_strbuf_get (&a_quieted);
+	a_bits = r_strbuf_get (&a_value);
+	r_strbuf_setf (out, "%s,?{,%s,}{,%s,?{,%s,0x%" PFMT64x ",|,}{,%s,?{,%s,}{,%s,?{,%s,"
+		"}{,0x%" PFMT64x ",},},},},", is_snan_a, a_quiet, is_snan_b, b, qbit, is_qnan_a,
+		a_bits, is_qnan_b, b, nanc);
+	r_strbuf_fini (&nan_a);
+	r_strbuf_fini (&nan_b);
+	r_strbuf_fini (&qnan_a);
+	r_strbuf_fini (&qnan_b);
+	r_strbuf_fini (&snan_a);
+	r_strbuf_fini (&snan_b);
+	r_strbuf_fini (&a_quieted);
+	r_strbuf_fini (&a_value);
+}
+
+
+// close a value still held as double bits into an esize lane value; the VM
+// turns FP overflow into a NaN so callers whose overflow must saturate pass
+// the 0/1 expression carrying the lost sign and NaN becomes signed infinity
+static void arm64_esil_f2lane(RStrBuf *out, int esize, const char *d, const char *sgn) {
+	const bool wide = esize == 64;
+	const ut64 infbits = wide? 0x7ff0000000000000ULL: 0x7f800000ULL;
+	const ut64 nanc = wide? 0x7ff8000000000000ULL: 0x7fc00000ULL, msbval = 1ULL << (esize - 1);
+	RStrBuf nan_value;
+	r_strbuf_init (&nan_value);
+	if (sgn) {
+		r_strbuf_setf (&nan_value, "%s,0x%" PFMT64x ",*,0x%" PFMT64x ",|", sgn, msbval, infbits);
+	} else {
+		r_strbuf_setf (&nan_value, "0x%" PFMT64x, nanc);
+	}
+	if (wide) {
+		r_strbuf_setf (out, "%s,0x7ff0000000000000,&,0x7ff0000000000000,-,!,!,?{,64,%s,D2F,}{,%s,DUP,F==,!,?{,%s,}{,%s,0x8000000000000000,&,0x7ff0000000000000,|,},},",
+			d, d, d, r_strbuf_get (&nan_value), d);
+	} else {
+		r_strbuf_setf (out, "%s,0x7ff0000000000000,&,0x7ff0000000000000,-,!,!,?{,32,%s,D2F,}{,%s,DUP,F==,!,?{,%s,}{,32,%s,0x8000000000000000,&,>>,0x7f800000,|,},},",
+			d, d, d, r_strbuf_get (&nan_value), d);
+	}
+	r_strbuf_fini (&nan_value);
+}
+
 // value expression for FPMin/FPMax of the lane bit strings a and b, or
 // the FPMinNum/FPMaxNum variant selected by num; shared by the lane-wise
 // minmax and the across-vector FP reductions
@@ -1917,14 +1996,17 @@ static void arm64_esil_minmax_expr(RStrBuf *out, int esize, bool ismax, bool num
 	const ut64 nanc = (esize == 32)? 0x7fc00000ULL: 0x7ff8000000000000ULL;
 	const ut64 qbit = (esize == 32)? 0x00400000ULL: 0x0008000000000000ULL;
 	const ut64 zmask = (1ULL << (esize - 1)) - 1; // magnitude bits of a lane
-	RStrBuf nan_a, nan_b, qnan_a, qnan_b, quiet_a, quiet_b, propagate, num_nan, pick, normalize;
-	const char *is_nan_a, *is_nan_b, *is_qnan_a, *is_qnan_b, *a_quieted, *b_quieted,
-		*propagated;
+	RStrBuf nan_a, nan_b, qnan_a, qnan_b, snan_a, snan_b, quiet_a, quiet_b, propagate, num_nan,
+		pick, normalize;
+	const char *is_nan_a, *is_nan_b, *is_qnan_a, *is_qnan_b, *is_snan_a, *is_snan_b,
+		*a_quieted, *b_quieted, *propagated;
 	const char *nanbody, *picked, *normal;
 	r_strbuf_init (&nan_a);
 	r_strbuf_init (&nan_b);
 	r_strbuf_init (&qnan_a);
 	r_strbuf_init (&qnan_b);
+	r_strbuf_init (&snan_a);
+	r_strbuf_init (&snan_b);
 	r_strbuf_init (&quiet_a);
 	r_strbuf_init (&quiet_b);
 	r_strbuf_init (&propagate);
@@ -1940,22 +2022,28 @@ static void arm64_esil_minmax_expr(RStrBuf *out, int esize, bool ismax, bool num
 	r_strbuf_appendf (&qnan_b, "%s,0x%" PFMT64x ",%s,&,!,!,&", is_nan_b, qbit, b);
 	is_qnan_a = r_strbuf_get (&qnan_a);
 	is_qnan_b = r_strbuf_get (&qnan_b);
+	r_strbuf_appendf (&snan_a, "%s,%s,-", is_nan_a, is_qnan_a);
+	r_strbuf_appendf (&snan_b, "%s,%s,-", is_nan_b, is_qnan_b);
+	is_snan_a = r_strbuf_get (&snan_a);
+	is_snan_b = r_strbuf_get (&snan_b);
 	r_strbuf_appendf (&quiet_a, "%s,0x%" PFMT64x ",|", a, qbit);
 	r_strbuf_appendf (&quiet_b, "%s,0x%" PFMT64x ",|", b, qbit);
 	a_quieted = r_strbuf_get (&quiet_a);
 	b_quieted = r_strbuf_get (&quiet_b);
-	// FPProcessNaNs rules: two NaN lanes take the default NaN, one NaN
-	// operand wins quieted by its payload's quiet bit
-	r_strbuf_appendf (&propagate, "%s,%s,&,?{,0x%" PFMT64x ",}{,%s,?{,%s,}{,%s,?{,%s,"
-		"}{,0x%" PFMT64x ",},},},", is_nan_a, is_nan_b, nanc, is_nan_b, b_quieted, is_nan_a, a_quieted, nanc);
+	// FPProcessNaNs: the first signaling NaN wins quieted by the quiet bit,
+	// else the first quiet NaN operand keeps its payload bits
+	r_strbuf_appendf (&propagate, "%s,?{,%s,}{,%s,?{,%s,}{,%s,?{,%s,}{,%s,?{,%s,"
+		"}{,0x%" PFMT64x ",},},},},", is_snan_a, a_quieted, is_snan_b, b_quieted, is_qnan_a,
+		a, is_qnan_b, b, nanc);
 	propagated = r_strbuf_get (&propagate);
 	nanbody = propagated;
 	if (num) {
-		// FPMinNum and FPMaxNum replace a quiet NaN with an infinity so
-		// it loses to the other operand, which then survives; a payload
-		// surviving that is a signaling NaN so it gets quieted
+		// FPMinNum and FPMaxNum replace a lone quiet NaN with an infinity so
+		// it loses to the other operand; two NaN lanes keep the first
+		// signaling NaN quieted or operand 1's payload
 		r_strbuf_appendf (&num_nan, "%s,%s,!,&,?{,%s,?{,%s,}{,%s,},}{,%s,%s,!,&,?{,%s,"
-			"?{,%s,}{,%s,},}{,%s,},},", is_qnan_a, is_qnan_b, is_nan_b, b_quieted, b, is_qnan_b, is_qnan_a, is_nan_a, a_quieted, a, propagated);
+			"?{,%s,}{,%s,},}{,%s,?{,%s,}{,%s,},},},", is_qnan_a, is_qnan_b, is_nan_b, b_quieted, b,
+			is_qnan_b, is_qnan_a, is_nan_a, a_quieted, a, is_nan_a, a_quieted, b_quieted);
 		nanbody = r_strbuf_get (&num_nan);
 	}
 	// numeric selection by the ordered FP compare; equal lanes take
@@ -2028,6 +2116,684 @@ static void arm64_esil_vec_minmax(RAnalOp *op, csh *handle, cs_insn *insn) {
 		r_strbuf_fini (&combined);
 	}
 }
+
+// value expression for FPProcessNaN of a single lane a: the payload survives
+// and a signaling NaN is quieted by its quiet bit, the default NaN appearing
+// only when FPCR.DN selects it
+static void arm64_esil_fp_procnan(RStrBuf *out, int esize, const char *a) {
+	const ut64 qbit = (esize == 32)? 0x00400000ULL: 0x0008000000000000ULL;
+	r_strbuf_setf (out, "%s,0x%" PFMT64x ",|", a, qbit);
+}
+
+// fmla/fmls per lane over the destination accumulator; the product and the
+// add round separately, matching the existing scalar FMADD ESIL, while the
+// NaN and infinity classes follow FPMulAdd and FPProcessNaNs3
+static void arm64_esil_vec_fmac(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	bool element, sub;
+	ut64 signlane, qbit, nanc;
+	int esize, lanes, i;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (!is_vector_op (&dst) || !is_vector_op (&src)) {
+		return;
+	}
+	esize = vector_size (&dst);
+	lanes = vas_count (dst.vas);
+	if ((esize != 32 && esize != 64) || vector_size (&src) != esize || vas_count (src.vas) != lanes) {
+		return;
+	}
+	element = src2.vector_index != -1;
+	if (element) {
+		if (!is_vector_op (&src2) && esize != 64) {
+			return;
+		}
+	} else if (!is_vector_op (&src2) || vector_size (&src2) != esize || vas_count (src2.vas) != lanes) {
+		return;
+	}
+	signlane = 1ULL << (esize - 1);
+	qbit = (esize == 32)? 0x00400000ULL: 0x0008000000000000ULL;
+	nanc = (esize == 32)? 0x7fc00000ULL: 0x7ff8000000000000ULL;
+	sub = insn->id == ARM64_INS_FMLS;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b, lane_acc, fma_value, lane, sign, sab, prod, closed, nan3, nanbody,
+			invpair, infp, signneq, nan_a, nan_b, nan_c, qnan_a, qnan_b, qnan_c, snan_a, snan_b,
+			snan_c, zero_a, zero_b, inf_a, inf_b, inf_c, ac_q, b_q, a_flip, a_flip_q;
+		const char *a, *b, *ac, *is_nan_a, *is_nan_b, *is_nan_c, *is_qnan_a, *is_qnan_b,
+			*is_qnan_c, *is_snan_a, *is_snan_b, *is_snan_c, *is_zero_a, *is_zero_b, *is_inf_a,
+			*is_inf_b, *is_inf_c;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		r_strbuf_init (&lane_acc);
+		r_strbuf_init (&fma_value);
+		r_strbuf_init (&lane);
+		r_strbuf_init (&sign);
+		r_strbuf_init (&sab);
+		r_strbuf_init (&prod);
+		r_strbuf_init (&closed);
+		r_strbuf_init (&nan3);
+		r_strbuf_init (&nanbody);
+		r_strbuf_init (&invpair);
+		r_strbuf_init (&infp);
+		r_strbuf_init (&signneq);
+		r_strbuf_init (&nan_a);
+		r_strbuf_init (&nan_b);
+		r_strbuf_init (&nan_c);
+		r_strbuf_init (&qnan_a);
+		r_strbuf_init (&qnan_b);
+		r_strbuf_init (&qnan_c);
+		r_strbuf_init (&snan_a);
+		r_strbuf_init (&snan_b);
+		r_strbuf_init (&snan_c);
+		r_strbuf_init (&zero_a);
+		r_strbuf_init (&zero_b);
+		r_strbuf_init (&inf_a);
+		r_strbuf_init (&inf_b);
+		r_strbuf_init (&inf_c);
+		r_strbuf_init (&ac_q);
+		r_strbuf_init (&b_q);
+		r_strbuf_init (&a_flip);
+		r_strbuf_init (&a_flip_q);
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		if (element && !is_vector_op (&src2)) {
+			// bare .D[index] forms carry no arrangement
+			const char *rn = cs_reg_name (*handle, src2.reg);
+			r_strbuf_setf (&lane_b, "%s%s", rn, src2.vector_index? "h": "l");
+		} else {
+			VECARG64_APPEND (&lane_b, 2, i, 0);
+		}
+		VECARG64_APPEND (&lane_acc, 0, i, 0);
+		a = r_strbuf_get (&lane_a);
+		b = r_strbuf_get (&lane_b);
+		ac = r_strbuf_get (&lane_acc);
+		// product sign, negated for fmls where operand 1 enters FPMulAdd negated
+		r_strbuf_setf (&sab, "%s,0x%" PFMT64x ",&,%s,0x%" PFMT64x ",&,^", a, signlane, b, signlane);
+		if (sub) {
+			r_strbuf_appendf (&sab, ",0x%" PFMT64x ",^", signlane);
+		}
+		r_strbuf_setf (&sign, "%s,?{,1,}{,0,},", r_strbuf_get (&sab));
+		// 0/1 classification expressions for the three operands
+		r_strbuf_setf (&nan_a, "%d,%s,F2D,DUP,F==,!", esize, a);
+		r_strbuf_setf (&nan_b, "%d,%s,F2D,DUP,F==,!", esize, b);
+		r_strbuf_setf (&nan_c, "%d,%s,F2D,DUP,F==,!", esize, ac);
+		is_nan_a = r_strbuf_get (&nan_a);
+		is_nan_b = r_strbuf_get (&nan_b);
+		is_nan_c = r_strbuf_get (&nan_c);
+		r_strbuf_setf (&qnan_a, "%s,0x%" PFMT64x ",%s,&,!,!,&", is_nan_a, qbit, a);
+		r_strbuf_setf (&qnan_b, "%s,0x%" PFMT64x ",%s,&,!,!,&", is_nan_b, qbit, b);
+		r_strbuf_setf (&qnan_c, "%s,0x%" PFMT64x ",%s,&,!,!,&", is_nan_c, qbit, ac);
+		is_qnan_a = r_strbuf_get (&qnan_a);
+		is_qnan_b = r_strbuf_get (&qnan_b);
+		is_qnan_c = r_strbuf_get (&qnan_c);
+		r_strbuf_setf (&snan_a, "%s,%s,-", is_nan_a, is_qnan_a);
+		r_strbuf_setf (&snan_b, "%s,%s,-", is_nan_b, is_qnan_b);
+		r_strbuf_setf (&snan_c, "%s,%s,-", is_nan_c, is_qnan_c);
+		is_snan_a = r_strbuf_get (&snan_a);
+		is_snan_b = r_strbuf_get (&snan_b);
+		is_snan_c = r_strbuf_get (&snan_c);
+		r_strbuf_setf (&zero_a, "%d,%s,F2D,0x7fffffffffffffff,&,0,-,!", esize, a);
+		r_strbuf_setf (&zero_b, "%d,%s,F2D,0x7fffffffffffffff,&,0,-,!", esize, b);
+		is_zero_a = r_strbuf_get (&zero_a);
+		is_zero_b = r_strbuf_get (&zero_b);
+		r_strbuf_setf (&inf_a, "%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!", esize, a);
+		r_strbuf_setf (&inf_b, "%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!", esize, b);
+		r_strbuf_setf (&inf_c, "%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!", esize, ac);
+		is_inf_a = r_strbuf_get (&inf_a);
+		is_inf_b = r_strbuf_get (&inf_b);
+		is_inf_c = r_strbuf_get (&inf_c);
+		r_strbuf_setf (&invpair, "%s,%s,&,%s,%s,&,|", is_inf_a, is_zero_b, is_zero_a, is_inf_b);
+		r_strbuf_setf (&infp, "%s,%s,|", is_inf_a, is_inf_b);
+		r_strbuf_setf (&signneq, "%s,%s,0x%" PFMT64x ",&,^,0,-,!,!,", r_strbuf_get (&sab), ac, signlane);
+		r_strbuf_setf (&ac_q, "%s,0x%" PFMT64x ",|", ac, qbit);
+		r_strbuf_setf (&b_q, "%s,0x%" PFMT64x ",|", b, qbit);
+		if (sub) {
+			r_strbuf_setf (&a_flip, "%s,0x%" PFMT64x ",^", a, signlane);
+		} else {
+			r_strbuf_setf (&a_flip, "%s", a);
+		}
+		r_strbuf_setf (&a_flip_q, "%s,0x%" PFMT64x ",|", r_strbuf_get (&a_flip), qbit);
+		// the product in double bits; a NaN in tmp is a double-domain overflow
+		r_strbuf_setf (&prod, "%d,%s,F2D,%d,%s,F2D,F*", esize, a, esize, b);
+		if (sub) {
+			r_strbuf_append (&prod, ",-F");
+		}
+		r_strbuf_setf (&fma_value, "tmp,%d,%s,F2D,F+", esize, ac);
+		arm64_esil_f2lane (&closed, esize, r_strbuf_get (&fma_value), r_strbuf_get (&sign));
+		// FPProcessNaNs3 over addend, operand 1 and operand 2: the first
+		// signaling NaN wins quieted, else the first quiet NaN with the
+		// addend ahead, an invalid (inf, 0) product overriding the addend
+		r_strbuf_setf (&nan3, "%s,%s,|,%s,|", is_nan_a, is_nan_b, is_nan_c);
+		r_strbuf_setf (&nanbody, "%s,?{,%s,}{,", is_snan_c, r_strbuf_get (&ac_q));
+		r_strbuf_appendf (&nanbody, "%s,?{,%s,}{,", is_snan_a, r_strbuf_get (&a_flip_q));
+		r_strbuf_appendf (&nanbody, "%s,?{,%s,}{,", is_snan_b, r_strbuf_get (&b_q));
+		r_strbuf_appendf (&nanbody, "%s,?{,%s,?{,0x%" PFMT64x ",}{,%s,},}{,", is_qnan_c,
+			r_strbuf_get (&invpair), nanc, ac);
+		r_strbuf_appendf (&nanbody, "%s,?{,%s,}{,%s,?{,%s,}{,0x%" PFMT64x ",},},},},},}",
+			is_qnan_a, r_strbuf_get (&a_flip), is_qnan_b, b, nanc);
+		// non-NaN lanes: zero times infinity and opposite-signed infinite
+		// sums are invalid, an overflowed product becomes a signed infinity
+		r_strbuf_setf (&lane, "%s,?{,%s,}{,", r_strbuf_get (&nan3), r_strbuf_get (&nanbody));
+		r_strbuf_appendf (&lane, "%s,?{,0x%" PFMT64x ",}{,", r_strbuf_get (&invpair), nanc);
+		r_strbuf_appendf (&lane, "%s,%s,&,%s,&,?{,0x%" PFMT64x ",}{,", r_strbuf_get (&infp),
+			is_inf_c, r_strbuf_get (&signneq), nanc);
+		r_strbuf_appendf (&lane, "%s,tmp,=,tmp,DUP,F==,!,%s,&,%s,&,?{,0x%" PFMT64x ",}{,",
+			r_strbuf_get (&prod), is_inf_c, r_strbuf_get (&signneq), nanc);
+		r_strbuf_append (&lane, r_strbuf_get (&closed));
+		r_strbuf_append (&lane, ",},},},},");
+		r_strbuf_append (&op->esil, r_strbuf_get (&lane));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		r_strbuf_fini (&lane_acc);
+		r_strbuf_fini (&fma_value);
+		r_strbuf_fini (&lane);
+		r_strbuf_fini (&sign);
+		r_strbuf_fini (&sab);
+		r_strbuf_fini (&prod);
+		r_strbuf_fini (&closed);
+		r_strbuf_fini (&nan3);
+		r_strbuf_fini (&nanbody);
+		r_strbuf_fini (&invpair);
+		r_strbuf_fini (&infp);
+		r_strbuf_fini (&signneq);
+		r_strbuf_fini (&nan_a);
+		r_strbuf_fini (&nan_b);
+		r_strbuf_fini (&nan_c);
+		r_strbuf_fini (&qnan_a);
+		r_strbuf_fini (&qnan_b);
+		r_strbuf_fini (&qnan_c);
+		r_strbuf_fini (&snan_a);
+		r_strbuf_fini (&snan_b);
+		r_strbuf_fini (&snan_c);
+		r_strbuf_fini (&zero_a);
+		r_strbuf_fini (&zero_b);
+		r_strbuf_fini (&inf_a);
+		r_strbuf_fini (&inf_b);
+		r_strbuf_fini (&inf_c);
+		r_strbuf_fini (&ac_q);
+		r_strbuf_fini (&b_q);
+		r_strbuf_fini (&a_flip);
+		r_strbuf_fini (&a_flip_q);
+	}
+}
+
+
+// fmaxp/fminp/fmaxnmp/fminnmp pairwise over the operand2::operand1 concatenation
+static void arm64_esil_vec_minmaxp(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	bool ismax = false, num = false;
+	int esize, lanes, half, n, j, i;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (!is_vector_op (&dst) || !is_vector_op (&src) || !is_vector_op (&src2)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (esize != 32 && esize != 64) {
+		return;
+	}
+	if (vector_size (&dst) != esize || vas_count (dst.vas) != lanes || lanes < 2 || (lanes & 1) ||
+		vector_size (&src2) != esize || vas_count (src2.vas) != lanes) {
+		return;
+	}
+	switch (insn->id) {
+	case ARM64_INS_FMAXP:
+		ismax = true;
+		break;
+	case ARM64_INS_FMAXNMP:
+		ismax = true;
+		num = true;
+		break;
+	case ARM64_INS_FMINNMP:
+		num = true;
+		break;
+	default:
+		break;
+	}
+	half = lanes / 2;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b, combined;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		r_strbuf_init (&combined);
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		n = i < half? 1: 2;
+		j = 2 * (i % half);
+		VECARG64_APPEND (&lane_a, n, j, 0);
+		VECARG64_APPEND (&lane_b, n, j + 1, 0);
+		arm64_esil_minmax_expr (&combined, esize, ismax, num, r_strbuf_get (&lane_a), r_strbuf_get (&lane_b));
+		r_strbuf_append (&op->esil, r_strbuf_get (&combined));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		r_strbuf_fini (&combined);
+	}
+}
+
+
+// fsqrt per lane; the raw bits are kept for zero and infinity so the 32-bit
+// lanes never see the 64-bit NaN and infinity bits D2F would emit for them
+static void arm64_esil_vec_sqrt(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op src;
+	ut64 signlane, nanc, expmant;
+	bool vector;
+	int esize, lanes, i;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	src = INSOP64 (1);
+	vector = is_vector_op (&src);
+	lanes = vector? vas_count (src.vas): 1;
+	esize = vector? vector_size (&src): REGBITS64 (1);
+	if (esize != 32 && esize != 64) {
+		return;
+	}
+	signlane = 1ULL << (esize - 1);
+	nanc = (esize == 32)? 0x7fc00000ULL: 0x7ff8000000000000ULL;
+	expmant = (esize == 32)? 0x7f800000ULL: 0x7ff0000000000000ULL;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, nan_value, sqrt_value, closed, lane;
+		const char *a;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&nan_value);
+		r_strbuf_init (&sqrt_value);
+		r_strbuf_init (&closed);
+		r_strbuf_init (&lane);
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		a = r_strbuf_get (&lane_a);
+		arm64_esil_fp_procnan (&nan_value, esize, a);
+		r_strbuf_setf (&sqrt_value, "%d,%s,F2D,SQRT", esize, a);
+		arm64_esil_f2lane (&closed, esize, r_strbuf_get (&sqrt_value), NULL);
+		// NaN, then the signed zero and +inf keeping raw bits, then the
+		// default NaN for every negative and SQRT for the plain values
+		r_strbuf_setf (&lane, "%d,%s,F2D,DUP,F==,!,?{,%s,}{,", esize, a, r_strbuf_get (&nan_value));
+		r_strbuf_appendf (&lane, "%s,0x%" PFMT64x ",&,0,-,!,?{,%s,}{,", a, signlane - 1, a);
+		r_strbuf_appendf (&lane, "%s,0x%" PFMT64x ",&,?{,0x%" PFMT64x ",}{,", a, signlane, nanc);
+		r_strbuf_appendf (&lane, "%s,0x%" PFMT64x ",-,!,?{,0x%" PFMT64x ",}{,", a, expmant, expmant);
+		r_strbuf_appendf (&lane, "%s,},},},},", r_strbuf_get (&closed));
+		r_strbuf_append (&op->esil, r_strbuf_get (&lane));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&nan_value);
+		r_strbuf_fini (&sqrt_value);
+		r_strbuf_fini (&closed);
+		r_strbuf_fini (&lane);
+	}
+}
+
+
+// frecpe/frsqrte estimate per lane: the special inputs follow the ISA table
+// entry exactly, while the normal range runs on a bit-hack seed refined by
+// Newton-Raphson steps through tmp instead of the 8-bit hardware lookup
+static void arm64_esil_vec_est(RAnalOp *op, csh *handle, cs_insn *insn) {
+	// calibrated seeds of the double-width bit-hack estimates
+	const ut64 recip_seed = 0x7fded6fa82e87a93ULL, rsq_seed = 0x5fe6eb50c7b537a9ULL;
+	cs_arm64_op src;
+	ut64 signlane, explane, nanc;
+	bool vector, rsq;
+	int esize, lanes, i, step;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	src = INSOP64 (1);
+	vector = is_vector_op (&src);
+	lanes = vector? vas_count (src.vas): 1;
+	esize = vector? vector_size (&src): REGBITS64 (1);
+	if (esize != 32 && esize != 64) {
+		return;
+	}
+	rsq = insn->id == ARM64_INS_FRSQRTE;
+	signlane = 1ULL << (esize - 1);
+	explane = (esize == 32)? 0x7f800000ULL: 0x7ff0000000000000ULL;
+	nanc = (esize == 32)? 0x7fc00000ULL: 0x7ff8000000000000ULL;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, nan_value, exact, newton, closed, lane;
+		const char *a;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&nan_value);
+		r_strbuf_init (&exact);
+		r_strbuf_init (&newton);
+		r_strbuf_init (&closed);
+		r_strbuf_init (&lane);
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		a = r_strbuf_get (&lane_a);
+		arm64_esil_fp_procnan (&nan_value, esize, a);
+		// zero and subnormal inputs (plus huge ones for the reciprocal) run
+		// on the exact 1/x and 1/sqrt with the input sign re-applied
+		if (rsq) {
+			r_strbuf_setf (&exact, "%d,%s,F2D,0x7fffffffffffffff,&,SQRT,0x3ff0000000000000,F/",
+				esize, a);
+		} else {
+			r_strbuf_setf (&exact, "%d,%s,F2D,0x7fffffffffffffff,&,0x3ff0000000000000,F/",
+				esize, a);
+		}
+		arm64_esil_f2lane (&closed, esize, r_strbuf_get (&exact), "0");
+		r_strbuf_setf (&exact, "%s,0x%" PFMT64x ",&,%s,|", a, signlane, r_strbuf_get (&closed));
+		// seed tmp with the bit-hack estimate, then chain the NR steps
+		if (rsq) {
+			r_strbuf_setf (&newton, "1,%d,%s,F2D,>>,0x%" PFMT64x ",-,tmp,=,", esize, a, rsq_seed);
+			for (step = 0; step < 4; step++) {
+				r_strbuf_appendf (&newton, "tmp,%d,%s,F2D,F*,tmp,F*,0x3fe0000000000000,F*,"
+					"-F,0x3ff8000000000000,F+,tmp,F*,tmp,=,", esize, a);
+			}
+		} else {
+			r_strbuf_setf (&newton, "%d,%s,F2D,0x%" PFMT64x ",-,tmp,=,", esize, a, recip_seed);
+			for (step = 0; step < 4; step++) {
+				r_strbuf_appendf (&newton, "tmp,%d,%s,F2D,F*,-F,0x4000000000000000,F+,tmp,F*,tmp,=,",
+					esize, a);
+			}
+		}
+		r_strbuf_fini (&closed);
+		r_strbuf_init (&closed);
+		arm64_esil_f2lane (&closed, esize, "tmp", NULL);
+		r_strbuf_append (&newton, r_strbuf_get (&closed));
+		if (rsq) {
+			// NaN, signed zero and subnormals exact, any negative (also
+			// -inf) to the default NaN, +inf to +0, else the NR estimate
+			r_strbuf_setf (&lane, "%d,%s,F2D,DUP,F==,!,?{,%s,}{,", esize, a, r_strbuf_get (&nan_value));
+			r_strbuf_appendf (&lane, "%s,0x%" PFMT64x ",&,0,-,!,%s,0x%" PFMT64x ",&,0,-,!,&,%s,0x%" PFMT64x ",&,0,-,!,|,?{,%s,}{,",
+				a, explane, a, signlane, a, signlane - 1, r_strbuf_get (&exact));
+			r_strbuf_appendf (&lane, "%s,0x%" PFMT64x ",&,?{,0x%" PFMT64x ",}{,", a, signlane, nanc);
+			r_strbuf_appendf (&lane, "%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,?{,0,}{,",
+				esize, a);
+			r_strbuf_appendf (&lane, "%s,},},},},", r_strbuf_get (&newton));
+		} else {
+			r_strbuf_setf (&lane, "%d,%s,F2D,DUP,F==,!,?{,%s,}{,", esize, a, r_strbuf_get (&nan_value));
+			r_strbuf_appendf (&lane, "%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,?{,%s,0x%" PFMT64x ",&,}{,",
+				esize, a, a, signlane);
+			r_strbuf_appendf (&lane, "%s,0x%" PFMT64x ",&,0,-,!,", a, explane);
+			r_strbuf_appendf (&lane, "0x7fe0000000000000,%d,%s,F2D,0x7fe0000000000000,&,>=,|,?{,%s,}{,",
+				esize, a, r_strbuf_get (&exact));
+			r_strbuf_appendf (&lane, "%s,},},},", r_strbuf_get (&newton));
+		}
+		r_strbuf_append (&op->esil, r_strbuf_get (&lane));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&nan_value);
+		r_strbuf_fini (&exact);
+		r_strbuf_fini (&newton);
+		r_strbuf_fini (&closed);
+		r_strbuf_fini (&lane);
+	}
+}
+
+
+// frecps/frsqrts per lane: the fused steps of the reciprocal and reciprocal
+// square root Newton-Raphson iterations, D = 2 - n * m and (3 - n * m) / 2
+static void arm64_esil_vec_fstep(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	ut64 infbits, pairc;
+	bool vector, rsq;
+	int esize, lanes, i;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (src.vector_index != -1 || src2.vector_index != -1) {
+		return;
+	}
+	vector = is_vector_op (&src);
+	lanes = vector? vas_count (src.vas): 1;
+	esize = vector? vector_size (&src): REGBITS64 (1);
+	if (esize != 32 && esize != 64) {
+		return;
+	}
+	if (vector) {
+		dst = INSOP64 (0);
+		if (!is_vector_op (&dst) || !is_vector_op (&src2) || vector_size (&dst) != esize ||
+			vas_count (dst.vas) != lanes || vector_size (&src2) != esize || vas_count (src2.vas) != lanes) {
+			return;
+		}
+	}
+	rsq = insn->id == ARM64_INS_FRSQRTS;
+	infbits = (esize == 32)? 0x7f800000ULL: 0x7ff0000000000000ULL;
+	// the constant the step collapses to for the (inf, 0) input pair
+	pairc = rsq
+		? ((esize == 32)? 0x3fc00000ULL: 0x3ff8000000000000ULL)
+		: ((esize == 32)? 0x40000000ULL: 0x4000000000000000ULL);
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b, propagate, step_value, sign, closed, classes, lane;
+		const char *a, *b;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		r_strbuf_init (&propagate);
+		r_strbuf_init (&step_value);
+		r_strbuf_init (&sign);
+		r_strbuf_init (&closed);
+		r_strbuf_init (&classes);
+		r_strbuf_init (&lane);
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		VECARG64_APPEND (&lane_b, 2, i, 0);
+		a = r_strbuf_get (&lane_a);
+		b = r_strbuf_get (&lane_b);
+		arm64_esil_fp_propnans (&propagate, esize, a, b, true);
+		if (rsq) {
+			r_strbuf_setf (&step_value, "%d,%s,F2D,%d,%s,F2D,F*,0x3fe0000000000000,F*,-F,0x3ff8000000000000,F+",
+				esize, a, esize, b);
+		} else {
+			r_strbuf_setf (&step_value, "%d,%s,F2D,%d,%s,F2D,F*,-F,0x4000000000000000,F+",
+				esize, a, esize, b);
+		}
+		// an overflowing step result flips to the opposite of the product sign
+		r_strbuf_setf (&sign, "%d,%s,F2D,0x8000000000000000,&,%d,%s,F2D,0x8000000000000000,&,^,!,?{,1,}{,0,},",
+			esize, a, esize, b);
+		arm64_esil_f2lane (&closed, esize, r_strbuf_get (&step_value), r_strbuf_get (&sign));
+		// classify the operands in the double domain: an infinite operand
+		// paired with a zero gives the positive constant, a lone infinity a
+		// signed infinity, the rest runs through the fused step
+		r_strbuf_setf (&classes, "%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,"
+			"%d,%s,F2D,0x7fffffffffffffff,&,0,-,!,&,", esize, a, esize, b);
+		r_strbuf_appendf (&classes, "%d,%s,F2D,0x7fffffffffffffff,&,0,-,!,"
+			"%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,&,|,?{,0x%" PFMT64x ",}{,",
+			esize, a, esize, b, pairc);
+		r_strbuf_appendf (&classes, "%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,"
+			"%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,|,?{,", esize, a, esize, b);
+		if (esize == 32) {
+			r_strbuf_appendf (&classes, "32,%d,%s,F2D,0x8000000000000000,&,%d,%s,F2D,0x8000000000000000,&,^,"
+				"0x8000000000000000,^,>>,0x%" PFMT64x ",|,}{,%s,", esize, a, esize, b, infbits,
+				r_strbuf_get (&closed));
+		} else {
+			r_strbuf_appendf (&classes, "%d,%s,F2D,0x8000000000000000,&,%d,%s,F2D,0x8000000000000000,&,^,"
+				"0x8000000000000000,^,0x%" PFMT64x ",|,}{,%s,", esize, a, esize, b, infbits,
+				r_strbuf_get (&closed));
+		}
+		r_strbuf_setf (&lane, "%d,%s,F2D,DUP,F==,!,%d,%s,F2D,DUP,F==,!,|,?{,%s,}{,",
+			esize, a, esize, b, r_strbuf_get (&propagate));
+		r_strbuf_appendf (&lane, "%s,},},},", r_strbuf_get (&classes));
+		r_strbuf_append (&op->esil, r_strbuf_get (&lane));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		r_strbuf_fini (&propagate);
+		r_strbuf_fini (&step_value);
+		r_strbuf_fini (&sign);
+		r_strbuf_fini (&closed);
+		r_strbuf_fini (&classes);
+		r_strbuf_fini (&lane);
+	}
+}
+
+
+// fmulx per lane: zeros behave like infinities of the same sign, so the
+// (inf, 0) pair gives a signed 2.0 and a lone zero gives a signed zero
+static void arm64_esil_vec_fmulx(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	ut64 infbits, twobits;
+	bool vector, element;
+	int esize, lanes, i;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	vector = is_vector_op (&src);
+	if (vector != is_vector_op (&dst)) {
+		return;
+	}
+	esize = vector? vector_size (&src): REGBITS64 (1);
+	lanes = vector? vas_count (src.vas): 1;
+	if (esize != 32 && esize != 64) {
+		return;
+	}
+	if (vector && (vector_size (&dst) != esize || vas_count (dst.vas) != lanes)) {
+		return;
+	}
+	element = src2.vector_index != -1;
+	if (element) {
+		if (!is_vector_op (&src2) && (esize != 64 || !vector)) {
+			return;
+		}
+	} else if (vector && (!is_vector_op (&src2) || vector_size (&src2) != esize ||
+		vas_count (src2.vas) != lanes)) {
+		return;
+	} else if (!vector && (is_vector_op (&src2) || REGBITS64 (2) != esize)) {
+		return;
+	}
+	infbits = (esize == 32)? 0x7f800000ULL: 0x7ff0000000000000ULL;
+	twobits = (esize == 32)? 0x40000000ULL: 0x4000000000000000ULL;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b, propagate, product, sign, closed, classes, sign_xor, lane;
+		const char *a, *b, *sign_bits;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		r_strbuf_init (&propagate);
+		r_strbuf_init (&product);
+		r_strbuf_init (&sign);
+		r_strbuf_init (&closed);
+		r_strbuf_init (&classes);
+		r_strbuf_init (&sign_xor);
+		r_strbuf_init (&lane);
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		if (element && !is_vector_op (&src2)) {
+			const char *rn = cs_reg_name (*handle, src2.reg);
+			r_strbuf_setf (&lane_b, "%s%s", rn, src2.vector_index? "h": "l");
+		} else {
+			VECARG64_APPEND (&lane_b, 2, i, 0);
+		}
+		a = r_strbuf_get (&lane_a);
+		b = r_strbuf_get (&lane_b);
+		arm64_esil_fp_propnans (&propagate, esize, a, b, false);
+		r_strbuf_setf (&product, "%d,%s,F2D,%d,%s,F2D,F*", esize, a, esize, b);
+		r_strbuf_setf (&sign, "%d,%s,F2D,0x8000000000000000,&,%d,%s,F2D,0x8000000000000000,&,^,?{,1,}{,0,},",
+			esize, a, esize, b);
+		arm64_esil_f2lane (&closed, esize, r_strbuf_get (&product), r_strbuf_get (&sign));
+		// the shared sign-xor prefix for the three special classes
+		r_strbuf_setf (&sign_xor, "%d,%s,F2D,0x8000000000000000,&,%d,%s,F2D,0x8000000000000000,&,^,",
+			esize, a, esize, b);
+		sign_bits = r_strbuf_get (&sign_xor);
+		r_strbuf_setf (&classes, "%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,"
+			"%d,%s,F2D,0x7fffffffffffffff,&,0,-,!,&,", esize, a, esize, b);
+		r_strbuf_appendf (&classes, "%d,%s,F2D,0x7fffffffffffffff,&,0,-,!,"
+			"%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,&,|,?{,", esize, a, esize, b);
+		if (esize == 32) {
+			r_strbuf_appendf (&classes, "32,%s,>>,0x%" PFMT64x ",|,}{,", sign_bits, twobits);
+		} else {
+			r_strbuf_appendf (&classes, "%s,0x%" PFMT64x ",|,}{,", sign_bits, twobits);
+		}
+		r_strbuf_appendf (&classes, "%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,"
+			"%d,%s,F2D,0x7ff0000000000000,&,0x7ff0000000000000,-,!,|,?{,", esize, a, esize, b);
+		if (esize == 32) {
+			r_strbuf_appendf (&classes, "32,%s,>>,0x%" PFMT64x ",|,}{,", sign_bits, infbits);
+		} else {
+			r_strbuf_appendf (&classes, "%s,0x%" PFMT64x ",|,}{,", sign_bits, infbits);
+		}
+		r_strbuf_appendf (&classes, "%d,%s,F2D,0x7fffffffffffffff,&,0,-,!,"
+			"%d,%s,F2D,0x7fffffffffffffff,&,0,-,!,|,?{,", esize, a, esize, b);
+		if (esize == 32) {
+			r_strbuf_appendf (&classes, "32,%s,>>,}{,%s,", sign_bits, r_strbuf_get (&closed));
+		} else {
+			r_strbuf_appendf (&classes, "%s,}{,%s,", sign_bits, r_strbuf_get (&closed));
+		}
+		r_strbuf_setf (&lane, "%d,%s,F2D,DUP,F==,!,%d,%s,F2D,DUP,F==,!,|,?{,%s,}{,",
+			esize, a, esize, b, r_strbuf_get (&propagate));
+		r_strbuf_appendf (&lane, "%s,},},},},", r_strbuf_get (&classes));
+		r_strbuf_append (&op->esil, r_strbuf_get (&lane));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		r_strbuf_fini (&propagate);
+		r_strbuf_fini (&product);
+		r_strbuf_fini (&sign);
+		r_strbuf_fini (&closed);
+		r_strbuf_fini (&classes);
+		r_strbuf_fini (&sign_xor);
+		r_strbuf_fini (&lane);
+	}
+}
+
+
+// frecpx: mirror the biased exponent bits, with zeros and subnormals going
+// to the max normal and NaNs handled by FPProcessNaN
+static void arm64_esil_frecpx(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op src;
+	const char *a;
+	ut64 signlane, explane, mantmask, qbit, maxc;
+	int esize;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	src = INSOP64 (1);
+	if (is_vector_op (&src)) {
+		return;
+	}
+	esize = REGBITS64 (1);
+	if (esize != 32 && esize != 64) {
+		return;
+	}
+	signlane = 1ULL << (esize - 1);
+	explane = (esize == 32)? 0x7f800000ULL: 0x7ff0000000000000ULL;
+	mantmask = (1ULL << (esize == 32? 23: 52)) - 1;
+	qbit = (esize == 32)? 0x00400000ULL: 0x0008000000000000ULL;
+	maxc = explane - (1ULL << (esize == 32? 23: 52));
+	a = REG64 (1);
+	// NaN keeps its payload, quieted by the quiet bit
+	r_strbuf_setf (&op->esil, "%s,0x%" PFMT64x ",&,0x%" PFMT64x ",-,!,%s,0x%" PFMT64x ",&,!,!,&,?{,",
+		a, explane, explane, a, mantmask);
+	r_strbuf_appendf (&op->esil, "%s,0x%" PFMT64x ",|,}{,", a, qbit);
+	// zeros and subnormals take the max normal, normals mirror the exponent
+	r_strbuf_appendf (&op->esil, "%s,0x%" PFMT64x ",&,0,-,!,?{,%s,0x%" PFMT64x ",&,0x%" PFMT64x ",|,}{,",
+		a, explane, a, signlane, maxc);
+	r_strbuf_appendf (&op->esil, "%s,0x%" PFMT64x ",&,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",&,|,",
+		a, explane, explane, a, signlane);
+	r_strbuf_append (&op->esil, "},},");
+	VEC64_DST_APPEND (&op->esil, 0, 0);
+	r_strbuf_append (&op->esil, ",=");
+}
+
 
 // narrowing/widening fp lane pairs for fcvtn/fcvtn2/fcvtl/fcvtl2
 static void arm64_esil_vec_fcvtnl(RAnalOp *op, csh *handle, cs_insn *insn) {
@@ -3560,6 +4326,33 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		}
 		break;
 	}
+	case ARM64_INS_FMLA:
+	case ARM64_INS_FMLS:
+		arm64_esil_vec_fmac (op, handle, insn);
+		break;
+	case ARM64_INS_FMAXP:
+	case ARM64_INS_FMINP:
+	case ARM64_INS_FMAXNMP:
+	case ARM64_INS_FMINNMP:
+		arm64_esil_vec_minmaxp (op, handle, insn);
+		break;
+	case ARM64_INS_FSQRT:
+		arm64_esil_vec_sqrt (op, handle, insn);
+		break;
+	case ARM64_INS_FRECPE:
+	case ARM64_INS_FRSQRTE:
+		arm64_esil_vec_est (op, handle, insn);
+		break;
+	case ARM64_INS_FRECPS:
+	case ARM64_INS_FRSQRTS:
+		arm64_esil_vec_fstep (op, handle, insn);
+		break;
+	case ARM64_INS_FMULX:
+		arm64_esil_vec_fmulx (op, handle, insn);
+		break;
+	case ARM64_INS_FRECPX:
+		arm64_esil_frecpx (op, handle, insn);
+		break;
 	case ARM64_INS_FADD:
 		FPOPCALL ("+");
 		break;
@@ -5701,6 +6494,12 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		op->type = R_ANAL_OP_TYPE_SUB;
 		break;
 	case ARM64_INS_FDIV:
+	case ARM64_INS_FSQRT:
+	case ARM64_INS_FRECPE:
+	case ARM64_INS_FRECPS:
+	case ARM64_INS_FRECPX:
+	case ARM64_INS_FRSQRTE:
+	case ARM64_INS_FRSQRTS:
 	case ARM64_INS_SDIV:
 	case ARM64_INS_UDIV:
 		op->cycles = 4;
@@ -5710,6 +6509,7 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_SMULL:
 	case ARM64_INS_FMUL:
 	case ARM64_INS_FNMUL:
+	case ARM64_INS_FMULX:
 	case ARM64_INS_UMULL:
 		/* TODO: if next instruction is also a MUL, cycles are /=2 */
 		/* also known as Register Indexing Addressing */
@@ -5749,6 +6549,8 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_FADD:
 	case ARM64_INS_FMADD:
 	case ARM64_INS_FNMADD:
+	case ARM64_INS_FMLA:
+	case ARM64_INS_FMLS:
 	case ARM64_INS_MADD:
 #if CS_API_MAJOR >= 6
 	case ARM64_INS_MADDPT:
