@@ -2370,6 +2370,78 @@ static void arm64_esil_vec_shrn(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// LD1/ST1 single and multiple structures and LD1R: contiguous per-element
+// accesses in the ISA for r { for e } order, plus post-index writeback
+static void arm64_esil_vec_ldst(RAnalOp *op, csh *handle, cs_insn *insn) {
+	const ut32 id = insn->id;
+	const int argc = OPCOUNT64 ();
+	int memi = argc - 1;
+	if (!ISMEM64 (memi)) {
+		memi--; // LD1 keeps the post-index offset in a separate operand
+	}
+	if (memi < 1 || !ISMEM64 (memi) || !ISREG64 (0) || !is_vector_op (&INSOP64 (0))) {
+		return;
+	}
+	const cs_arm64_op op0 = INSOP64 (0);
+	const bool indexed = op0.vector_index != -1;
+	const int lanes = indexed? 1: vas_count (op0.vas);
+	const int ebytes = vector_size (&op0) / 8;
+	const int nregs = indexed? 1: memi;
+	if (lanes < 1 || ebytes < 1 || ebytes > 8 || nregs < 1 || nregs > 4) {
+		return;
+	}
+	int r;
+	for (r = 0; r < nregs; r++) {
+		if (!ISREG64 (r) || !is_vector_op (&INSOP64 (r))) {
+			return;
+		}
+	}
+	const char *base = MEMBASE64 (memi);
+	const st64 sdisp = MEMDISP64 (memi);
+	const ut64 disp = sdisp < 0? -(ut64)sdisp: (ut64)sdisp;
+	const bool is_store = id == ARM64_INS_ST1;
+	ut64 off = disp;
+	int e;
+	for (r = 0; r < nregs; r++) {
+		for (e = 0; e < lanes; e++) {
+			if (r || e) {
+				COMMA (&op->esil);
+			}
+			if (is_store) {
+				VECARG64_APPEND (&op->esil, r, indexed? -1: e, 0);
+				r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",%s,+,=[%d]", off, base, ebytes);
+			} else {
+				r_strbuf_appendf (&op->esil, "0x%" PFMT64x ",%s,+,[%d],", off, base, ebytes);
+				VEC64_DST_APPEND (&op->esil, r, indexed? -1: e);
+				r_strbuf_append (&op->esil, ",=");
+			}
+			if (!indexed && id != ARM64_INS_LD1R) {
+				off += ebytes; // LD1R reads the same element for all lanes
+			}
+		}
+	}
+	if (!indexed && nregs > 1 && lanes * ebytes == 8) {
+		// D-form structures zero the upper half of v1..v3; the zext pass
+		// only covers the first destination register
+		for (r = 1; r < nregs; r++) {
+			r_strbuf_appendf (&op->esil, ",0,%sh,=", REG64 (r));
+		}
+	}
+	if (insn->detail->arm64.writeback) {
+		if (memi + 1 < argc && ISIMM64 (memi + 1)) {
+			off = (ut64)IMM64 (memi + 1);
+		} else if (memi + 1 < argc && ISREG64 (memi + 1)) {
+			r_strbuf_appendf (&op->esil, ",%s,%s,+,%s,=", REG64 (memi + 1), base, base);
+			return;
+		} else {
+			// Capstone omits the fixed post-index immediate of ST1 and LD1R
+			off = (indexed || id == ARM64_INS_LD1R)? (ut64)ebytes:
+				(ut64)nregs * lanes * ebytes;
+		}
+		r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",%s,+,%s,=", off, base, base);
+	}
+}
+
 // per-lane shifts by #imm
 static void arm64_esil_vec_shift(RAnalOp *op, csh *handle, cs_insn *insn, int amount) {
 	cs_arm64_op src = INSOP64 (1);
@@ -3630,6 +3702,11 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		}
 		break;
 	}
+	case ARM64_INS_LD1:
+	case ARM64_INS_LD1R:
+	case ARM64_INS_ST1:
+		arm64_esil_vec_ldst (op, handle, insn);
+		break;
 	case ARM64_INS_RBIT:
 	{
 		cs_arm64_op src = INSOP64 (1);
@@ -5309,6 +5386,11 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 			op->stackptr = -(st64)IMM64 (2);
 		}
 		break;
+	case ARM64_INS_ST1:
+		// Capstone omits the fixed post-index offset operand, so skip the
+		// pre/post-index stack accounting above
+		op->type = R_ANAL_OP_TYPE_STORE;
+		break;
 	case ARM64_INS_LDUR:
 	case ARM64_INS_LDURB:
 	case ARM64_INS_LDRSW:
@@ -5321,6 +5403,8 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_LDPSW:
 	case ARM64_INS_LDRH:
 	case ARM64_INS_LDRB:
+	case ARM64_INS_LD1:
+	case ARM64_INS_LD1R:
 		op->type = R_ANAL_OP_TYPE_LOAD;
 		switch (insn->id) {
 		case ARM64_INS_LDRB:
