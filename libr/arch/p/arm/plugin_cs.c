@@ -2496,6 +2496,197 @@ static void arm64_esil_vec_ldst(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// DUP (element and general): replicate a source element or the low bits of
+// a GPR over all lanes of the destination
+static void arm64_esil_vec_dup(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op src, dst;
+	int esize, lanes, ebytes, e;
+	RStrBuf element;
+	const char *element_expr;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	src = INSOP64 (1);
+	dst = INSOP64 (0);
+	esize = vector_size (&dst);
+	lanes = vas_count (dst.vas);
+	if (esize < 8 || esize > 64 || lanes < 1 || lanes > 16) {
+		return;
+	}
+	ebytes = esize / 8;
+	r_strbuf_init (&element);
+	if (is_vector_op (&src)) {
+		int off;
+		if (src.vector_index == -1) {
+			r_strbuf_fini (&element);
+			return;
+		}
+		// the ISA indexes the element in destination-size units
+		off = src.vector_index * ebytes;
+		if (off + ebytes > 16) {
+			r_strbuf_fini (&element);
+			return;
+		}
+		r_strbuf_appendf (&element, "%d,%s%s,>>", (off % 8) * 8, REG64 (1), off < 8? "l": "h");
+	} else {
+		r_strbuf_appendf (&element, "%s", REG64 (1));
+	}
+	if (esize < 64) {
+		r_strbuf_appendf (&element, ",0x%" PFMT64x ",&", (ut64)((1ULL << esize) - 1));
+	}
+	element_expr = r_strbuf_get (&element);
+	for (e = 0; e < lanes; e++) {
+		if (e > 0) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_append (&op->esil, element_expr);
+		COMMA (&op->esil);
+		VEC64_DST_APPEND (&op->esil, 0, e);
+		r_strbuf_append (&op->esil, ",=");
+	}
+	r_strbuf_fini (&element);
+}
+
+// UMOV/SMOV: move a vector element to a GPR with zero or sign extension;
+// the d-lane-to-x form reaches analop64_esil renamed to MOV by Capstone
+static void arm64_esil_vec_umov(RAnalOp *op, csh *handle, cs_insn *insn, bool sgn) {
+	cs_arm64_op src, dst;
+	int esize, dbits, ebytes, off;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	src = INSOP64 (1);
+	dst = INSOP64 (0);
+	if (is_vector_op (&dst) || !is_vector_op (&src) || src.vector_index == -1) {
+		return;
+	}
+	esize = vector_size (&src);
+	dbits = REGBITS64 (0);
+	if (esize < 8 || esize > 64 || esize > dbits) {
+		return;
+	}
+	ebytes = esize / 8;
+	off = src.vector_index * ebytes;
+	if (off + ebytes > 16) {
+		return;
+	}
+	r_strbuf_setf (&op->esil, "%d,%s%s,>>", (off % 8) * 8, REG64 (1), off < 8? "l": "h");
+	if (esize < 64) {
+		r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",&", (ut64)((1ULL << esize) - 1));
+	}
+	if (sgn && esize < dbits) {
+		// flip the sign bit then subtract it: sign-extends esize to 64 bits,
+		// the register write truncates w destinations to 32
+		const ut64 sb = 1ULL << (esize - 1);
+		r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",SWAP,^,0x%" PFMT64x ",SWAP,-", sb, sb);
+	}
+	r_strbuf_appendf (&op->esil, ",%s,=", REG64 (0));
+}
+
+// MOVI/MVNI: replicate the expanded immediate over all lanes; Capstone
+// reports the raw imm8 and the shift, so the element pattern is rebuilt
+// here (MSL inserts the inverted imm8 into a ones element)
+static void arm64_esil_vec_movi(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, immop;
+	int esize, lanes, k;
+	const char *base;
+	char vbuf[8];
+	ut64 emask, pat, lo, hi;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISIMM64 (1)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	base = REG64 (0);
+	if (is_vector_op (&dst)) {
+		esize = vector_size (&dst);
+		lanes = vas_count (dst.vas);
+	} else {
+		if (!base || (base[0] != 'd' && base[0] != 's')) {
+			return;
+		}
+		esize = base[0] == 'd'? 64: 32;
+		lanes = 1;
+		snprintf (vbuf, sizeof (vbuf), "v%s", base + 1);
+		base = vbuf;
+	}
+	if (esize < 8 || esize > 64 || lanes < 1 || lanes > 16) {
+		return;
+	}
+	emask = esize == 64? UT64_MAX: ((1ULL << esize) - 1);
+	pat = (ut64)IMM64 (1);
+	immop = INSOP64 (1);
+	if (esize != 64) {
+		if (immop.shift.type == ARM64_SFT_MSL) {
+			pat = ~(pat << immop.shift.value);
+		} else if (immop.shift.type == ARM64_SFT_LSL) {
+			pat <<= immop.shift.value;
+		}
+	}
+	pat &= emask;
+	if (insn->id == ARM64_INS_MVNI) {
+		pat = ~pat & emask;
+	}
+	lo = 0;
+	hi = 0;
+	for (k = 0; k < lanes; k++) {
+		ut64 *half = (k * esize < 64)? &lo: &hi;
+		*half |= pat << ((k * esize) % 64);
+	}
+	r_strbuf_setf (&op->esil, "0x%" PFMT64x ",%sl,=,0x%" PFMT64x ",%sh,=",
+		lo, base, hi, base);
+}
+
+// TBL/TBX: byte lookup in a table of one to four vector registers indexed
+// by the source bytes; each candidate chunk matches on its base, which
+// also rejects out-of-range indices, and TBX keeps the old byte when the
+// index is out of range
+static void arm64_esil_vec_tbl(RAnalOp *op, csh *handle, cs_insn *insn, bool ext) {
+	const int argc = OPCOUNT64 (), nregs = argc - 2;
+	int r, lanes, bound, i, c;
+	const char *mreg, *dreg;
+	if (nregs < 1 || nregs > 4) {
+		return;
+	}
+	for (r = 0; r < argc; r++) {
+		if (!ISREG64 (r) || !is_vector_op (&INSOP64 (r))) {
+			return;
+		}
+	}
+	lanes = vas_count (INSOP64 (0).vas);
+	if (lanes < 1 || lanes > 16) {
+		return;
+	}
+	mreg = REG64 (argc - 1);
+	dreg = REG64 (0);
+	bound = 16 * nregs;
+	for (i = 0; i < lanes; i++) {
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		// tmp holds the unsigned index byte of this lane
+		r_strbuf_appendf (&op->esil, "%d,%s%s,>>,0xff,&,tmp,=",
+			(i % 8) * 8, mreg, i < 8? "l": "h");
+		for (c = 0; c < 2 * nregs; c++) {
+			// each chunk contributes its byte only when the index matches
+			// its base, otherwise zero; no branches are needed
+			r_strbuf_appendf (&op->esil,
+				",%s%s,tmp,7,&,8,*,SWAP,>>,0xff,&,tmp,0xf8,&,%d,^,!,*",
+				REG64 (1 + (c >> 1)), (c & 1)? "h": "l", 8 * c);
+			if (c > 0) {
+				r_strbuf_append (&op->esil, ",+");
+			}
+		}
+		if (ext) {
+			r_strbuf_appendf (&op->esil,
+				",%d,tmp,<,*,%d,tmp,<,!,%d,%s%s,>>,0xff,&,*,|",
+				bound, bound, (i % 8) * 8, dreg, i < 8? "l": "h");
+		}
+		COMMA (&op->esil);
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+	}
+}
+
 // per-lane shifts by #imm
 static void arm64_esil_vec_shift(RAnalOp *op, csh *handle, cs_insn *insn, int amount) {
 	cs_arm64_op src = INSOP64 (1);
@@ -2865,6 +3056,12 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		if (dst.vas && src.vas && dst.vector_index == -1 && src.vector_index == -1) {
 			r_strbuf_setf (&op->esil, "%sh,%sh,=,%sl,%sl,=",
 				REG64 (1), REG64 (0), REG64 (1), REG64 (0));
+		} else if (!is_vector_op (&dst) && is_vector_op (&src) && src.vector_index != -1) {
+			// umov of a d lane to an x register is renamed to MOV by Capstone
+			arm64_esil_vec_umov (op, handle, insn, false);
+		} else if (is_vector_op (&dst) && is_vector_op (&src) && dst.vector_index == -1) {
+			// mov Vd.T, Vn.T[i] is the DUP (general) alias
+			arm64_esil_vec_dup (op, handle, insn);
 		} else {
 			// lane insert; the src lane comes from its vector_index when the
 			// source is a vector (ins/mov v0.s[1], v1.s[2] arrives as MOV)
@@ -3782,6 +3979,25 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_ST3:
 	case ARM64_INS_ST4:
 		arm64_esil_vec_ldst (op, handle, insn);
+		break;
+	case ARM64_INS_DUP:
+		arm64_esil_vec_dup (op, handle, insn);
+		break;
+	case ARM64_INS_UMOV:
+		arm64_esil_vec_umov (op, handle, insn, false);
+		break;
+	case ARM64_INS_SMOV:
+		arm64_esil_vec_umov (op, handle, insn, true);
+		break;
+	case ARM64_INS_MOVI:
+	case ARM64_INS_MVNI:
+		arm64_esil_vec_movi (op, handle, insn);
+		break;
+	case ARM64_INS_TBL:
+		arm64_esil_vec_tbl (op, handle, insn, false);
+		break;
+	case ARM64_INS_TBX:
+		arm64_esil_vec_tbl (op, handle, insn, true);
 		break;
 	case ARM64_INS_RBIT:
 	{
@@ -5254,6 +5470,9 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		op->cycles = 1;
 		/* fallthru */
 	case ARM64_INS_MOVI:
+	case ARM64_INS_MVNI:
+	case ARM64_INS_TBL:
+	case ARM64_INS_TBX:
 	case ARM64_INS_MOVK:
 	case ARM64_INS_MOVN:
 	case ARM64_INS_SMOV:

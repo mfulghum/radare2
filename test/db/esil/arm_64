@@ -6045,3 +6045,362 @@ EXPECT=<<EOF
 0x00000000
 EOF
 RUN
+NAME=arm64 ESIL dup broadcasts a vector lane over all lanes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 2004144e # dup v0.4s, v1.s[2]
+aei
+aeip
+aer v1l=0x2222222211111111
+aer v1h=0x4444444433333333
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20040f4e # dup v0.16b, v1.b[7]
+aei
+aeip
+aer v1l=0x807060504030201
+aer v1h=0x100f0e0d0c0b0a09
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20040e4e # dup v0.8h, v1.h[3]
+aei
+aeip
+aer v1l=0x4444333322221111
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20040c0e # dup v0.2s, v1.s[1]
+aei
+aeip
+aer v1l=0x2222222211111111
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x3333333333333333
+0x3333333333333333
+0x808080808080808
+0x808080808080808
+0x4444444444444444
+0x4444444444444444
+0x2222222222222222
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL dup general broadcasts GPR bits to all lanes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 200c044e # dup v0.4s, w1
+aei
+aeip
+aer x1=0x1111111155aa33cc
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 200c014e # dup v0.16b, w1
+aei
+aeip
+aer x1=0x1122334455667788
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 200c040e # dup v0.2s, w1
+aei
+aeip
+aer x1=0x1111111112345678
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 200c084e # dup v0.2d, x1
+aei
+aeip
+aer x1=0x1122334455667788
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x55aa33cc55aa33cc
+0x55aa33cc55aa33cc
+0x8888888888888888
+0x8888888888888888
+0x1234567812345678
+0x00000000
+0x1122334455667788
+0x1122334455667788
+EOF
+RUN
+
+NAME=arm64 ESIL umov smov move a lane to a GPR with zero or sign extension
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 003c184e # mov x0, v0.d[1]
+aei
+aeip
+aer v0l=0x1111111111111111
+aer v0h=0xfeedfacecafebeef
+aer x0=0xbbbbbbbbbbbbbbbb
+aes
+aer x0
+wx 003c0e0e # umov w0, v0.h[3]
+aei
+aeip
+aer v0l=0xddddccccbbbbaaaa
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer x0=0xbbbbbbbbbbbbbbbb
+aes
+aer x0
+wx 002c1f4e # smov x0, v0.b[15]
+aei
+aeip
+aer v0l=0x1111111111111111
+aer v0h=0x1122334455667788
+aer x0=0xbbbbbbbbbbbbbbbb
+aes
+aer x0
+wx 002c1e4e # smov x0, v0.h[7]
+aei
+aeip
+aer v0l=0x1111111111111111
+aer v0h=0xf00d333344445555
+aer x0=0xbbbbbbbbbbbbbbbb
+aes
+aer x0
+wx 002c070e # smov w0, v0.b[3]
+aei
+aeip
+aer v0l=0x1122334481226699
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer x0=0xbbbbbbbbbbbbbbbb
+aes
+aer x0
+EOF
+EXPECT=<<EOF
+0xfeedfacecafebeef
+0x0000dddd
+0x00000011
+0xfffffffffffff00d
+0xffffff81
+EOF
+RUN
+
+NAME=arm64 ESIL movi mvni replicate the expanded immediate over all lanes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx a0e6024f # movi v0.16b, #0x55
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx a006024f # movi v0.4s, #0x55
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20a6004f # movi v0.8h, #0x11, lsl #8
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20a6006f # mvni v0.8h, #0x11, lsl #8
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 00e4046f # movi v0.2d #0xff00000000000000
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 60e4002f # movi d0 #0xffff
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx a0d6024f # movi v0.4s #0x55 msl #16
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx a006026f # mvni v0.4s #0x55
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x5555555555555555
+0x5555555555555555
+0x5500000055
+0x5500000055
+0x1100110011001100
+0x1100110011001100
+0xeeffeeffeeffeeff
+0xeeffeeffeeffeeff
+0xff00000000000000
+0xff00000000000000
+0x0000ffff
+0x00000000
+0xffaaffffffaaffff
+0xffaaffffffaaffff
+0xffffffaaffffffaa
+0xffffffaaffffffaa
+EOF
+RUN
+
+NAME=arm64 ESIL tbl looks up bytes in one to four register tables
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 2000024e # tbl v0.16b, {v1.16b}, v2.16b
+aei
+aeip
+aer v1l=0x4746454443424140
+aer v1h=0x4f4e4d4c4b4a4948
+aer v2l=0x607100f03020100
+aer v2h=0x1020304050607
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 2020034e # tbl v0.16b, {v1.16b-v2.16b}, v3.16b
+aei
+aeip
+aer v1l=0x4746454443424140
+aer v1h=0x4f4e4d4c4b4a4948
+aer v2l=0x8786858483828180
+aer v2h=0x8f8e8d8c8b8a8988
+aer v3l=0xff031405101f1100
+aer v3h=0x706050403020100
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 2040040e # tbl v0.8b, {v1.16b-v3.16b}, v4.8b
+aei
+aeip
+aer v1l=0x4746454443424140
+aer v1h=0x1111111111111148
+aer v2l=0x8786858483828180
+aer v2h=0x2222222222222290
+aer v3l=0xc7c6c5c4c3c2c1c0
+aer v3h=0xbbbbbbbbbbbbbbbb
+aer v4l=0xff18083028201000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 2060054e # tbl v0.16b, {v1.16b-v4.16b}, v5.16b
+aei
+aeip
+aer v1l=0x4746454443424140
+aer v1h=0x4f4e4d4c4b4a4948
+aer v2l=0x8786858483828180
+aer v2h=0x8f8e8d8c8b8a8988
+aer v3l=0xc7c6c5c4c3c2c1c0
+aer v3h=0xcfcecdcccbcac9c8
+aer v4l=0x807060504030201
+aer v4h=0x1817161514131211
+aer v5l=0x3f504f4030201000
+aer v5h=0x603464131211101
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x4647004f43424140
+0x4041424344454647
+0x438445808f8140
+0x4746454443424140
+0x904800bbc08040
+0x00000000
+0x1800000001c08040
+0x4643000002c18141
+EOF
+RUN
+
+NAME=arm64 ESIL tbx keeps the old bytes for out-of-range indices
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 2030034e # tbx v0.16b, {v1.16b-v2.16b}, v3.16b
+aei
+aeip
+aer v0l=0xaaaaaaaaaaaaaaaa
+aer v0h=0xaaaaaaaaaaaaaaaa
+aer v1l=0x4746454443424140
+aer v1h=0x4f4e4d4c4b4a4948
+aer v2l=0x8786858483828180
+aer v2h=0x8f8e8d8c8b8a8988
+aer v3l=0x101f05ff211000
+aer v3h=0x100030201008002
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x40808f45aaaa8040
+0x414043424140aa42
+EOF
+RUN
