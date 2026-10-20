@@ -2370,54 +2370,108 @@ static void arm64_esil_vec_shrn(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
-// LD1/ST1 single and multiple structures and LD1R: contiguous per-element
-// accesses in the ISA for r { for e } order, plus post-index writeback
+// LD1/ST1/LD2-4/ST2-4 single and multiple structures and LD1R/LD2R-4R:
+// contiguous per-element accesses in the ISA loop order (for r { for e }
+// for the LD1/ST1 family, for e { for r } when interleaving), plus
+// post-index writeback
 static void arm64_esil_vec_ldst(RAnalOp *op, csh *handle, cs_insn *insn) {
 	const ut32 id = insn->id;
 	const int argc = OPCOUNT64 ();
 	int memi = argc - 1;
+	bool is_store, interleave, replicate, indexed;
+	int nregs, r, lanes, ebytes, total, k;
+	int lane; // shared lane index of the indexed (single structure) forms
+	cs_arm64_op op0;
+	const char *base;
+	st64 sdisp;
+	ut64 disp, off;
 	if (!ISMEM64 (memi)) {
 		memi--; // LD1 keeps the post-index offset in a separate operand
 	}
 	if (memi < 1 || !ISMEM64 (memi) || !ISREG64 (0) || !is_vector_op (&INSOP64 (0))) {
 		return;
 	}
-	const cs_arm64_op op0 = INSOP64 (0);
-	const bool indexed = op0.vector_index != -1;
-	const int lanes = indexed? 1: vas_count (op0.vas);
-	const int ebytes = vector_size (&op0) / 8;
-	const int nregs = indexed? 1: memi;
-	if (lanes < 1 || ebytes < 1 || ebytes > 8 || nregs < 1 || nregs > 4) {
-		return;
+	is_store = false;
+	interleave = false;
+	replicate = false;
+	switch (id) {
+	case ARM64_INS_ST1:
+		is_store = true;
+		break;
+	case ARM64_INS_ST2:
+	case ARM64_INS_ST3:
+	case ARM64_INS_ST4:
+		is_store = true;
+		interleave = true;
+		break;
+	case ARM64_INS_LD2:
+	case ARM64_INS_LD3:
+	case ARM64_INS_LD4:
+		interleave = true;
+		break;
+	case ARM64_INS_LD1R:
+	case ARM64_INS_LD2R:
+	case ARM64_INS_LD3R:
+	case ARM64_INS_LD4R:
+		replicate = true;
+		break;
+	default:
+		break;
 	}
-	int r;
+	nregs = memi;
+	lane = -1;
 	for (r = 0; r < nregs; r++) {
 		if (!ISREG64 (r) || !is_vector_op (&INSOP64 (r))) {
 			return;
 		}
+		if (INSOP64 (r).vector_index != -1) {
+			lane = INSOP64 (r).vector_index;
+		}
 	}
-	const char *base = MEMBASE64 (memi);
-	const st64 sdisp = MEMDISP64 (memi);
-	const ut64 disp = sdisp < 0? -(ut64)sdisp: (ut64)sdisp;
-	const bool is_store = id == ARM64_INS_ST1;
-	ut64 off = disp;
-	int e;
-	for (r = 0; r < nregs; r++) {
-		for (e = 0; e < lanes; e++) {
-			if (r || e) {
-				COMMA (&op->esil);
-			}
-			if (is_store) {
-				VECARG64_APPEND (&op->esil, r, indexed? -1: e, 0);
-				r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",%s,+,=[%d]", off, base, ebytes);
-			} else {
-				r_strbuf_appendf (&op->esil, "0x%" PFMT64x ",%s,+,[%d],", off, base, ebytes);
-				VEC64_DST_APPEND (&op->esil, r, indexed? -1: e);
-				r_strbuf_append (&op->esil, ",=");
-			}
-			if (!indexed && id != ARM64_INS_LD1R) {
-				off += ebytes; // LD1R reads the same element for all lanes
-			}
+	op0 = INSOP64 (0);
+	indexed = lane != -1;
+	lanes = indexed? 1: vas_count (op0.vas);
+	ebytes = vector_size (&op0) / 8;
+	if (lanes < 1 || ebytes < 1 || ebytes > 8 || nregs < 1 || nregs > 4) {
+		return;
+	}
+	base = MEMBASE64 (memi);
+	sdisp = MEMDISP64 (memi);
+	disp = sdisp < 0? -(ut64)sdisp: (ut64)sdisp;
+	// one memory access per (register, lane) element: linear per register for
+	// LD1/ST1, per lane across registers when interleaving, one element
+	// replicated over the lanes for LDxR, shared lane for the indexed forms
+	total = indexed? nregs: nregs * lanes;
+	off = disp;
+	for (k = 0; k < total; k++) {
+		int rr, el;
+		if (indexed) {
+			rr = k;
+			el = lane;
+			off = disp + (ut64)k * ebytes;
+		} else if (replicate) {
+			rr = k / lanes;
+			el = k % lanes;
+			off = disp + (ut64)rr * ebytes; // re-read for each lane
+		} else if (interleave) {
+			rr = k % nregs;
+			el = k / nregs;
+			off = disp + (ut64)k * ebytes;
+		} else {
+			rr = k / lanes;
+			el = k % lanes;
+			off = disp + (ut64)k * ebytes;
+		}
+		if (k > 0) {
+			COMMA (&op->esil);
+		}
+		if (is_store) {
+			VECARG64_APPEND (&op->esil, rr, el, 0);
+			r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",%s,+,=[%d]", off, base, ebytes);
+		} else {
+			r_strbuf_appendf (&op->esil, "0x%" PFMT64x ",%s,+,[%d],", off, base, ebytes);
+			VEC64_DST_APPEND (&op->esil, rr, el);
+			r_strbuf_append (&op->esil, ",=");
 		}
 	}
 	if (!indexed && nregs > 1 && lanes * ebytes == 8) {
@@ -2434,8 +2488,8 @@ static void arm64_esil_vec_ldst(RAnalOp *op, csh *handle, cs_insn *insn) {
 			r_strbuf_appendf (&op->esil, ",%s,%s,+,%s,=", REG64 (memi + 1), base, base);
 			return;
 		} else {
-			// Capstone omits the fixed post-index immediate of ST1 and LD1R
-			off = (indexed || id == ARM64_INS_LD1R)? (ut64)ebytes:
+			// Capstone omits the fixed post-index immediate of these forms
+			off = (indexed || replicate)? (ut64)nregs * ebytes:
 				(ut64)nregs * lanes * ebytes;
 		}
 		r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",%s,+,%s,=", off, base, base);
@@ -3591,6 +3645,7 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		break;
 	}
 	case ARM64_INS_LDP: // ldp x29, x30, [sp], 0x10
+	case ARM64_INS_LDNP: // ldnp q0, q1, [x1] (relaxed non-temporal pair load)
 	{
 		const int disp = (int)MEMDISP64 (2);
 		char sign = (disp >= 0)? '+': '-';
@@ -3629,6 +3684,18 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 					abs, MEMBASE64 (2), sign, size,
 					size, abs, MEMBASE64 (2), sign, size,
 					REG64 (1), REG64 (0));
+		}
+		// scalar SIMD destinations zero the v bits above their width; the
+		// zext pass only covers the first register operand
+		int i;
+		for (i = 0; i < 2; i++) {
+			const char *rn = i? REG64 (1): REG64 (0);
+			int n = atoi (rn + 1);
+			if (rn[0] == 'd') {
+				r_strbuf_appendf (&op->esil, ",0,v%dh,=", n);
+			} else if (rn[0] == 's') {
+				r_strbuf_appendf (&op->esil, ",0xffffffff,v%dl,&=,0,v%dh,=", n, n);
+			}
 		}
 		break;
 	}
@@ -3704,7 +3771,16 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	}
 	case ARM64_INS_LD1:
 	case ARM64_INS_LD1R:
+	case ARM64_INS_LD2:
+	case ARM64_INS_LD2R:
+	case ARM64_INS_LD3:
+	case ARM64_INS_LD3R:
+	case ARM64_INS_LD4:
+	case ARM64_INS_LD4R:
 	case ARM64_INS_ST1:
+	case ARM64_INS_ST2:
+	case ARM64_INS_ST3:
+	case ARM64_INS_ST4:
 		arm64_esil_vec_ldst (op, handle, insn);
 		break;
 	case ARM64_INS_RBIT:
@@ -5387,9 +5463,23 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		}
 		break;
 	case ARM64_INS_ST1:
+	case ARM64_INS_ST2:
+	case ARM64_INS_ST3:
+	case ARM64_INS_ST4:
 		// Capstone omits the fixed post-index offset operand, so skip the
 		// pre/post-index stack accounting above
 		op->type = R_ANAL_OP_TYPE_STORE;
+		break;
+	case ARM64_INS_LD1:
+	case ARM64_INS_LD1R:
+	case ARM64_INS_LD2:
+	case ARM64_INS_LD2R:
+	case ARM64_INS_LD3:
+	case ARM64_INS_LD3R:
+	case ARM64_INS_LD4:
+	case ARM64_INS_LD4R:
+		// structure loads likewise report no writeback offset operand
+		op->type = R_ANAL_OP_TYPE_LOAD;
 		break;
 	case ARM64_INS_LDUR:
 	case ARM64_INS_LDURB:
@@ -5403,8 +5493,6 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_LDPSW:
 	case ARM64_INS_LDRH:
 	case ARM64_INS_LDRB:
-	case ARM64_INS_LD1:
-	case ARM64_INS_LD1R:
 		op->type = R_ANAL_OP_TYPE_LOAD;
 		switch (insn->id) {
 		case ARM64_INS_LDRB:
