@@ -6404,3 +6404,414 @@ EXPECT=<<EOF
 0x414043424140aa42
 EOF
 RUN
+NAME=arm64 ESIL addv sums all lanes into the low element
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20b8314e # addv b0, v1.16b
+aei
+aeip
+aer v1l=0xfa0780ff0001fe03
+aer v1h=0xff8132c8fd010101
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20b8b14e # addv s0, v1.4s
+aei
+aeip
+aer v1l=0x2222222211111111
+aer v1h=0x88888888ffffffff
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20b8714e # addv h0, v1.8h
+aei
+aeip
+aer v1l=0x1ffff00020003
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x000000fc
+0x00000000
+0xbbbbbbba
+0x00000000
+0x0000eef1
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL smaxv sminv umaxv uminv select the extreme lane
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20a8b04e # smaxv s0, v1.4s
+aei
+aeip
+aer v1l=0x580000000
+aer v1h=0x7fffffffffffffff
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20a8314e # sminv b0, v1.16b
+aei
+aeip
+aer v1l=0x4030201807fff05
+aer v1h=0x7070707079c6400
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20a8706e # umaxv h0, v1.8h
+aei
+aeip
+aer v1l=0x1ffff80000000
+aer v1h=0xffff000112340000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20a8b16e # uminv s0, v1.4s
+aei
+aeip
+aer v1l=0x1ffffffff
+aer v1h=0x8000000000000002
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x7fffffff
+0x00000000
+0x00000080
+0x00000000
+0x0000ffff
+0x00000000
+0x00000001
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL addp faddp add adjacent lane pairs of two vectors
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20bc224e # addp v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v1l=0x1010101ffffff01
+aer v1h=0x80808080ffff01ff
+aer v2l=0xffffffffffffffff
+aer v2h=0x7f7f7f7f81810101
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20bc624e # addp v0.8h, v1.8h, v2.8h
+aei
+aeip
+aer v1l=0x10002ffff0000
+aer v1h=0x80007fff00010001
+aer v2l=0xffffffff00000001
+aer v2h=0x12345678abcd0001
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20bca20e # addp v0.2s, v1.2s, v2.2s
+aei
+aeip
+aer v1l=0xffffffff00000001
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v2l=0x800000017fffffff
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d4226e # faddp v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v1l=0x401000003fc00000
+aer v1h=0xbfc00000
+aer v2l=0xf149f2ca7149f2ca
+aer v2h=0x40e0000040e00000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xfe000202fe00
+0xfefe0202fefefefe
+0xffff00020003ffff
+0x68acabcefffe0001
+0x00000000
+0x00000000
+0xbfc0000040700000
+0x4160000000000000
+EOF
+RUN
+
+NAME=arm64 ESIL addp faddp reduce one pair to a scalar
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20b8f15e # addp d0, v1.2d
+aei
+aeip
+aer v1l=0xffffffffffffffff
+aer v1h=0x00000002
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8307e # faddp s0, v1.2s
+aei
+aeip
+aer v1l=0x401000003fc00000
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20d8707e # faddp d0, v1.2d
+aei
+aeip
+aer v1l=0x3ff8000000000000
+aer v1h=0xc004000000000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x00000001
+0x00000000
+0x40700000
+0x00000000
+0xbff0000000000000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL fmaxv fminv fold fp lanes with nan and zero rules
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20f8306e # fmaxv s0, v1.4s
+aei
+aeip
+aer v1l=0x400000003f800000
+aer v1h=0x42c80000c0200000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8b06e # fminv s0, v1.4s
+aei
+aeip
+aer v1l=0x400000003f800000
+aer v1h=0x42c80000c0200000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8306e # fmaxv s0, v1.4s
+aei
+aeip
+aer v1l=0x7fc0000140800000
+aer v1h=0x7fa0000241200000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8b06e # fminv s0, v1.4s
+aei
+aeip
+aer v1l=0x4080000040000000
+aer v1h=0x7fa555553f800000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8306e # fmaxv s0, v1.4s
+aei
+aeip
+aer v1l=0x400000003f800000
+aer v1h=0x7f8555553f800000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20f8306e # fmaxv s0, v1.4s
+aei
+aeip
+aer v1l=0x8000000000000000
+aer v1h=0xc0400000c0200000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x42c80000
+0x00000000
+0xc0200000
+0x00000000
+0x7fc00000
+0x00000000
+0x7fe55555
+0x00000000
+0x7fc55555
+0x00000000
+0x00000000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL fmaxnmv fminnmv ignore lone quiet nans
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20c8306e # fmaxnmv s0, v1.4s
+aei
+aeip
+aer v1l=0x7f80000140000000
+aer v1h=0x404000003f800000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20c8b06e # fminnmv s0, v1.4s
+aei
+aeip
+aer v1l=0x7fa000017fc00002
+aer v1h=0x7fc000037ff40001
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x40400000
+0x00000000
+0x7fc00000
+0x00000000
+EOF
+RUN
+
+NAME=arm64 ESIL saddlp uaddlp widen and add long lane pairs
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 2028204e # saddlp v0.8h, v1.16b
+aei
+aeip
+aer v1l=0x3fe7f800201ffff
+aer v1h=0xff00009c9c6464
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 2028604e # saddlp v0.4s, v1.8h
+aei
+aeip
+aer v1l=0xffffffff00000001
+aer v1h=0x80007fff00010001
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 2028a06e # uaddlp v0.2d, v1.4s
+aei
+aeip
+aer v1l=0xffffffffffffffff
+aer v1h=0x180000000
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x1ffff0003fffe
+0xffff0000ff3800c8
+0xfffffffe00000001
+0xffffffff00000002
+0x1fffffffe
+0x80000001
+EOF
+RUN
+
+NAME=arm64 ESIL sadalp uadalp accumulate widened pair sums
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 2068204e # sadalp v0.8h, v1.16b
+aei
+aeip
+aer v1l=0xffffffffffffffff
+aer v1h=0x123456780000ffff
+aer v0l=0x1000200030004
+aer v0h=0xffffffff
+aes
+aer v0l
+aer v0h
+wx 2068606e # uadalp v0.4s, v1.8h
+aei
+aeip
+aer v1l=0xffffffff00000001
+aer v1h=0xffffffffffffffff
+aer v0l=0xfffffffffffffffe
+aer v0h=0x200000003
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xffff000000010002
+0x4600cefffffffd
+0x1fffdffffffff
+0x2000000020001
+EOF
+RUN

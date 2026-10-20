@@ -2687,6 +2687,297 @@ static void arm64_esil_vec_tbl(RAnalOp *op, csh *handle, cs_insn *insn, bool ext
 	}
 }
 
+// ADDV and the S/U MAXV/MINV forms fold all lanes into the low element of
+// the destination with the rest zeroed; the fold runs left to right through
+// tmp, which the ISA tree reduction agrees with for associative integer ops
+static void arm64_esil_vec_reduceint(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src;
+	const char *dname;
+	int vnum, esize, lanes, i;
+	bool sum, ismin, sgn;
+	ut64 mask, sb;
+	RStrBuf lane_expr;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	if (is_vector_op (&dst) || !is_vector_op (&src)) {
+		return;
+	}
+	dname = cs_reg_name (*handle, dst.reg);
+	if (!dname || !strchr ("bhsd", dname[0]) || !isdigit ((ut8)dname[1])) {
+		return;
+	}
+	vnum = atoi (dname + 1);
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (vnum < 0 || vnum > 31 || esize < 8 || esize > 64 || lanes < 2 || lanes * esize > 128) {
+		return;
+	}
+	sum = false;
+	ismin = false;
+	sgn = false;
+	switch (insn->id) {
+	case ARM64_INS_ADDV:
+		sum = true;
+		break;
+	case ARM64_INS_SMAXV:
+		sgn = true;
+		break;
+	case ARM64_INS_SMINV:
+		sgn = true;
+		ismin = true;
+		break;
+	case ARM64_INS_UMAXV:
+		break;
+	case ARM64_INS_UMINV:
+		ismin = true;
+		break;
+	default:
+		return;
+	}
+	mask = esize == 64? UT64_MAX: ((1ULL << esize) - 1);
+	sb = 1ULL << (esize - 1);
+	r_strbuf_init (&lane_expr);
+	VECARG64_APPEND (&lane_expr, 1, 0, 0);
+	r_strbuf_setf (&op->esil, "%s,tmp,=", r_strbuf_get (&lane_expr));
+	for (i = 1; i < lanes; i++) {
+		const char *lane;
+		r_strbuf_fini (&lane_expr);
+		r_strbuf_init (&lane_expr);
+		VECARG64_APPEND (&lane_expr, 1, i, 0);
+		lane = r_strbuf_get (&lane_expr);
+		r_strbuf_append (&op->esil, ",");
+		if (sum) {
+			r_strbuf_appendf (&op->esil, "tmp,%s,+,tmp,=", lane);
+		} else if (sgn && ismin) {
+			// flipping the sign bit orders signed lanes as unsigned
+			r_strbuf_appendf (&op->esil, "tmp,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,<,?{,%s,tmp,=,},",
+				sb, lane, sb, lane);
+		} else if (sgn) {
+			r_strbuf_appendf (&op->esil, "%s,0x%" PFMT64x ",^,tmp,0x%" PFMT64x ",^,<,?{,%s,tmp,=,},",
+				lane, sb, sb, lane);
+		} else if (ismin) {
+			r_strbuf_appendf (&op->esil, "tmp,%s,<,?{,%s,tmp,=,},", lane, lane);
+		} else {
+			r_strbuf_appendf (&op->esil, "%s,tmp,<,?{,%s,tmp,=,},", lane, lane);
+		}
+	}
+	r_strbuf_fini (&lane_expr);
+	r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",tmp,&,v%dl,=", mask, vnum);
+}
+
+// FMAXV/FMINV/FMAXNMV/FMINNMV fold all lanes through tmp with the same
+// FPMax/FPMin (Num) combine as the lane-wise forms; the halving tree of the
+// ISA reduction agrees with the left fold under its NaN and zero rules
+static void arm64_esil_vec_reducefp(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src;
+	int esize, lanes, i;
+	bool ismax, num;
+	RStrBuf lane_expr, combined;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	if (is_vector_op (&dst) || !is_vector_op (&src)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (esize != 32 && esize != 64) {
+		return; // fp16 forms are rejected
+	}
+	if (lanes < 2 || lanes * esize > 128) {
+		return;
+	}
+	ismax = false;
+	num = false;
+	switch (insn->id) {
+	case ARM64_INS_FMAXV:
+		ismax = true;
+		break;
+	case ARM64_INS_FMAXNMV:
+		ismax = true;
+		num = true;
+		break;
+	case ARM64_INS_FMINNMV:
+		num = true;
+		break;
+	default:
+		break;
+	}
+	r_strbuf_init (&lane_expr);
+	r_strbuf_init (&combined);
+	VECARG64_APPEND (&lane_expr, 1, 0, 0);
+	r_strbuf_setf (&op->esil, "%s,tmp,=", r_strbuf_get (&lane_expr));
+	for (i = 1; i < lanes; i++) {
+		r_strbuf_fini (&lane_expr);
+		r_strbuf_init (&lane_expr);
+		VECARG64_APPEND (&lane_expr, 1, i, 0);
+		arm64_esil_minmax_expr (&combined, esize, ismax, num, "tmp", r_strbuf_get (&lane_expr));
+		r_strbuf_append (&op->esil, ",");
+		r_strbuf_append (&op->esil, r_strbuf_get (&combined));
+		r_strbuf_append (&op->esil, "tmp,=");
+	}
+	r_strbuf_fini (&lane_expr);
+	r_strbuf_fini (&combined);
+	r_strbuf_append (&op->esil, ",tmp,");
+	VEC64_DST_APPEND (&op->esil, 0, 0);
+	r_strbuf_append (&op->esil, ",=");
+}
+
+// ADDP/FADDP: pairwise adds of adjacent lanes; the 3-register form folds
+// operand 1 into the low result half and operand 2 into the high one (the
+// ISA concatenates them as operand2::operand1), while the 2-register form
+// reduces one pair to a scalar
+static void arm64_esil_vec_pdp(RAnalOp *op, csh *handle, cs_insn *insn, bool fp) {
+	const int argc = OPCOUNT64 ();
+	int r, esize, lanes, dlanes, half, i;
+	cs_arm64_op dst, src;
+	if (argc < 2 || argc > 3) {
+		return;
+	}
+	for (r = 0; r < argc; r++) {
+		if (!ISREG64 (r)) {
+			return;
+		}
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	if (!is_vector_op (&src)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (fp? (esize != 32 && esize != 64): (esize < 8 || esize > 64)) {
+		return;
+	}
+	if (!is_vector_op (&dst)) {
+		const char *dname = cs_reg_name (*handle, dst.reg), *want = fp? "sd": "d";
+		RStrBuf lane_a, lane_b;
+		if (argc != 2 || lanes != 2 || !dname || !strchr (want, dname[0])) {
+			return;
+		}
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		VECARG64_APPEND (&lane_a, 1, 0, 0);
+		VECARG64_APPEND (&lane_b, 1, 1, 0);
+		if (fp) {
+			r_strbuf_setf (&op->esil, "%d,DUP,%s,F2D,%d,%s,F2D,F+,D2F,",
+				esize, r_strbuf_get (&lane_a), esize, r_strbuf_get (&lane_b));
+		} else {
+			r_strbuf_setf (&op->esil, "%s,%s,+,", r_strbuf_get (&lane_a), r_strbuf_get (&lane_b));
+		}
+		VEC64_DST_APPEND (&op->esil, 0, 0);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		return;
+	}
+	dlanes = vas_count (dst.vas);
+	if (argc != 3 || dlanes != lanes || vector_size (&dst) != esize || lanes < 2 || (lanes & 1)) {
+		return;
+	}
+	half = lanes / 2;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b;
+		int n, j;
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		n = i < half? 1: 2;
+		j = 2 * (i % half);
+		VECARG64_APPEND (&lane_a, n, j, 0);
+		VECARG64_APPEND (&lane_b, n, j + 1, 0);
+		if (fp) {
+			r_strbuf_appendf (&op->esil, "%d,DUP,%s,F2D,%d,%s,F2D,F+,D2F,",
+				esize, r_strbuf_get (&lane_a), esize, r_strbuf_get (&lane_b));
+		} else {
+			r_strbuf_appendf (&op->esil, "%s,%s,+,", r_strbuf_get (&lane_a), r_strbuf_get (&lane_b));
+		}
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+	}
+}
+
+// SADDLP/UADDLP/SADALP/UADALP: add adjacent narrow pairs into wide lanes,
+// accumulating into the destination in the ALP forms
+static void arm64_esil_vec_pwl(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src;
+	int desize, esize, lanes, e;
+	bool sgn, acc;
+	ut64 sb;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	if (!is_vector_op (&dst) || !is_vector_op (&src)) {
+		return;
+	}
+	desize = vector_size (&dst);
+	esize = vector_size (&src);
+	lanes = vas_count (dst.vas);
+	if (desize != 2 * esize || esize < 8 || esize > 32 || lanes * desize != 128 ||
+		vas_count (src.vas) != 2 * lanes) {
+		return;
+	}
+	sgn = false;
+	acc = false;
+	switch (insn->id) {
+	case ARM64_INS_SADDLP:
+		sgn = true;
+		break;
+	case ARM64_INS_SADALP:
+		sgn = true;
+		acc = true;
+		break;
+	case ARM64_INS_UADALP:
+		acc = true;
+		break;
+	default:
+		break;
+	}
+	sb = 1ULL << (esize - 1);
+	for (e = 0; e < lanes; e++) {
+		int k;
+		if (e > 0) {
+			COMMA (&op->esil);
+		}
+		for (k = 0; k < 2; k++) {
+			RStrBuf pair_lane;
+			r_strbuf_init (&pair_lane);
+			VECARG64_APPEND (&pair_lane, 1, 2 * e + k, 0);
+			if (k > 0) {
+				r_strbuf_append (&op->esil, ",");
+			}
+			r_strbuf_append (&op->esil, r_strbuf_get (&pair_lane));
+			if (sgn) {
+				// flip the sign bit then subtract it to sign-extend
+				r_strbuf_appendf (&op->esil, ",0x%" PFMT64x ",SWAP,^,0x%" PFMT64x ",SWAP,-", sb, sb);
+			}
+			r_strbuf_fini (&pair_lane);
+		}
+		r_strbuf_append (&op->esil, ",+");
+		if (acc) {
+			RStrBuf acc_lane;
+			r_strbuf_init (&acc_lane);
+			VECARG64_APPEND (&acc_lane, 0, e, 0);
+			r_strbuf_appendf (&op->esil, ",%s,+", r_strbuf_get (&acc_lane));
+			r_strbuf_fini (&acc_lane);
+		}
+		COMMA (&op->esil);
+		VEC64_DST_APPEND (&op->esil, 0, e);
+		r_strbuf_append (&op->esil, ",=");
+	}
+}
+
 // per-lane shifts by #imm
 static void arm64_esil_vec_shift(RAnalOp *op, csh *handle, cs_insn *insn, int amount) {
 	cs_arm64_op src = INSOP64 (1);
@@ -3998,6 +4289,31 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		break;
 	case ARM64_INS_TBX:
 		arm64_esil_vec_tbl (op, handle, insn, true);
+		break;
+	case ARM64_INS_ADDV:
+	case ARM64_INS_SMAXV:
+	case ARM64_INS_SMINV:
+	case ARM64_INS_UMAXV:
+	case ARM64_INS_UMINV:
+		arm64_esil_vec_reduceint (op, handle, insn);
+		break;
+	case ARM64_INS_FMAXV:
+	case ARM64_INS_FMINV:
+	case ARM64_INS_FMAXNMV:
+	case ARM64_INS_FMINNMV:
+		arm64_esil_vec_reducefp (op, handle, insn);
+		break;
+	case ARM64_INS_ADDP:
+		arm64_esil_vec_pdp (op, handle, insn, false);
+		break;
+	case ARM64_INS_FADDP:
+		arm64_esil_vec_pdp (op, handle, insn, true);
+		break;
+	case ARM64_INS_SADDLP:
+	case ARM64_INS_UADDLP:
+	case ARM64_INS_SADALP:
+	case ARM64_INS_UADALP:
+		arm64_esil_vec_pwl (op, handle, insn);
 		break;
 	case ARM64_INS_RBIT:
 	{
@@ -5473,6 +5789,21 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_MVNI:
 	case ARM64_INS_TBL:
 	case ARM64_INS_TBX:
+	case ARM64_INS_ADDV:
+	case ARM64_INS_SMAXV:
+	case ARM64_INS_SMINV:
+	case ARM64_INS_UMAXV:
+	case ARM64_INS_UMINV:
+	case ARM64_INS_FMAXV:
+	case ARM64_INS_FMINV:
+	case ARM64_INS_FMAXNMV:
+	case ARM64_INS_FMINNMV:
+	case ARM64_INS_ADDP:
+	case ARM64_INS_FADDP:
+	case ARM64_INS_SADDLP:
+	case ARM64_INS_UADDLP:
+	case ARM64_INS_SADALP:
+	case ARM64_INS_UADALP:
 	case ARM64_INS_MOVK:
 	case ARM64_INS_MOVN:
 	case ARM64_INS_SMOV:
