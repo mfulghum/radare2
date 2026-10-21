@@ -4459,6 +4459,100 @@ static void arm64_esil_vec_pmull(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// ZIP1/ZIP2/UZP1/UZP2/TRN1/TRN2/EXT: per-lane copies whose source lane and
+// register are picked by the ISA permute element equations; every lane value
+// is pushed before any lane is written so the sources may alias the
+// destination
+static void arm64_esil_vec_permute(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	bool uzp = false, trn = false, ext = false;
+	int esize, lanes, part = 0, imm = 0;
+	int i;
+	switch (insn->id) {
+	case ARM64_INS_ZIP1:
+		break;
+	case ARM64_INS_ZIP2:
+		part = 1;
+		break;
+	case ARM64_INS_UZP1:
+		uzp = true;
+		break;
+	case ARM64_INS_UZP2:
+		uzp = true;
+		part = 1;
+		break;
+	case ARM64_INS_TRN1:
+		trn = true;
+		break;
+	case ARM64_INS_TRN2:
+		trn = true;
+		part = 1;
+		break;
+	case ARM64_INS_EXT:
+		ext = true;
+		break;
+	default:
+		return;
+	}
+	if (OPCOUNT64 () != (ext? 4: 3) || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (!is_vector_op (&dst) || !is_vector_op (&src) || !is_vector_op (&src2)) {
+		return;
+	}
+	esize = vector_size (&dst);
+	lanes = vas_count (dst.vas);
+	if (esize < 8 || esize > 64 || (esize & (esize - 1)) ||
+		vector_size (&src) != esize || vector_size (&src2) != esize ||
+		vas_count (src.vas) != lanes || vas_count (src2.vas) != lanes ||
+		lanes < 2 || (lanes & 1)) {
+		return;
+	}
+	if (ext) {
+		if (esize != 8 || (lanes != 8 && lanes != 16)) {
+			return;
+		}
+		imm = IMM64 (3);
+		if (imm >= lanes) {
+			// the 8-byte forms UNDEF when imm4[3] is set
+			return;
+		}
+	}
+	for (i = lanes - 1; i >= 0; i--) {
+		RStrBuf val;
+		int srcop = (i & 1)? 2: 1;
+		int j = i;
+		if (ext) {
+			int pos = i + imm;
+			srcop = (pos < lanes)? 1: 2;
+			j = pos % lanes;
+		} else if (trn) {
+			j = (i & ~1) + part;
+		} else if (uzp) {
+			int t = 2 * i + part;
+			srcop = (t < lanes)? 1: 2;
+			j = (t < lanes)? t: t - lanes;
+		} else {
+			j = part * (lanes / 2) + (i / 2);
+		}
+		r_strbuf_init (&val);
+		VECARG64_APPEND (&val, srcop, j, 0);
+		if (i != lanes - 1) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_append (&op->esil, r_strbuf_get (&val));
+		r_strbuf_fini (&val);
+	}
+	for (i = 0; i < lanes; i++) {
+		COMMA (&op->esil);
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+	}
+}
+
 // SADDLP/UADDLP/SADALP/UADALP: add adjacent narrow pairs into wide lanes,
 // accumulating into the destination in the ALP forms
 static void arm64_esil_vec_pwl(RAnalOp *op, csh *handle, cs_insn *insn) {
@@ -5943,6 +6037,15 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_SADALP:
 	case ARM64_INS_UADALP:
 		arm64_esil_vec_pwl (op, handle, insn);
+		break;
+	case ARM64_INS_ZIP1:
+	case ARM64_INS_ZIP2:
+	case ARM64_INS_UZP1:
+	case ARM64_INS_UZP2:
+	case ARM64_INS_TRN1:
+	case ARM64_INS_TRN2:
+	case ARM64_INS_EXT:
+		arm64_esil_vec_permute (op, handle, insn);
 		break;
 	case ARM64_INS_RBIT:
 	{
@@ -7460,6 +7563,8 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_SQSUB:
 	case ARM64_INS_SRHADD:
 	case ARM64_INS_SUQADD:
+	case ARM64_INS_TRN1:
+	case ARM64_INS_TRN2:
 	case ARM64_INS_UABD:
 	case ARM64_INS_UHADD:
 	case ARM64_INS_UHSUB:
@@ -7469,6 +7574,10 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_UQSUB:
 	case ARM64_INS_URHADD:
 	case ARM64_INS_USQADD:
+	case ARM64_INS_UZP1:
+	case ARM64_INS_UZP2:
+	case ARM64_INS_ZIP1:
+	case ARM64_INS_ZIP2:
 	case ARM64_INS_MOVK:
 	case ARM64_INS_MOVN:
 	case ARM64_INS_SMOV:

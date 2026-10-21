@@ -9604,3 +9604,1023 @@ EXPECT=<<EOF
 0x81010401850210
 EOF
 RUN
+
+NAME=arm64 ESIL zip1 zip2 vector lane interleaves
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 2038024e # zip1 v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x7e02fe3cc340bf03
+aer v2h=0x01807fff0055aa81
+aes
+aer v0l
+aer v0h
+wx 0038024e # zip1 v0.16b, v0.16b, v2.16b
+aei
+aeip
+aer v0l=0x81aa5500ff7f8001
+aer v0h=0x03bf40c33cfe027e
+aer v1l=0xbbbbbbbbbbbbbbbb
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v2l=0xf00f80017fff552a
+aer v2h=0xf00f80017fff552a
+aes
+aer v0l
+aer v0h
+wx 2038c24e # zip1 v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0000000000000001
+aer v1h=0x8000000000000000
+aer v2l=0x7fffffffffffffff
+aer v2h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+wx 2038820e # zip1 v0.2s, v1.2s, v2.2s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0x0000000000000000
+aer v2l=0xffffffff7fffffff
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2038420e # zip1 v0.4h, v1.4h, v2.4h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0x0000000000000000
+aer v2l=0xff800080abcd1234
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2038824e # zip1 v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0xffffffff7fffffff
+aer v2l=0x10000000deadbeef
+aer v2h=0x7fff8001ffff8000
+aes
+aer v0l
+aer v0h
+wx 2038020e # zip1 v0.8b, v1.8b, v2.8b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x0000000000000000
+aer v2l=0x03bf40c33cfe027e
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2038424e # zip1 v0.8h, v1.8h, v2.8h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0xff800080abcd1234
+aer v2l=0x1234abcd0080ff80
+aer v2h=0x000180007fffffff
+aes
+aer v0l
+aer v0h
+wx 2078024e # zip2 v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x7e02fe3cc340bf03
+aer v2h=0x01807fff0055aa81
+aes
+aer v0l
+aer v0h
+wx 2078c24e # zip2 v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0000000000000001
+aer v1h=0x8000000000000000
+aer v2l=0x7fffffffffffffff
+aer v2h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+wx 2078820e # zip2 v0.2s, v1.2s, v2.2s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0x0000000000000000
+aer v2l=0xffffffff7fffffff
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2078420e # zip2 v0.4h, v1.4h, v2.4h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0x0000000000000000
+aer v2l=0xff800080abcd1234
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2078824e # zip2 v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0xffffffff7fffffff
+aer v2l=0x10000000deadbeef
+aer v2h=0x7fff8001ffff8000
+aes
+aer v0l
+aer v0h
+wx 2078020e # zip2 v0.8b, v1.8b, v2.8b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x0000000000000000
+aer v2l=0x03bf40c33cfe027e
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2078424e # zip2 v0.8h, v1.8h, v2.8h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0xff800080abcd1234
+aer v2l=0x1234abcd0080ff80
+aer v2h=0x000180007fffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xc3ff407fbf800301
+0x7e8102aafe553c00
+0x7fffff7f55802a01
+0xf0810faa80550100
+0x00000001
+0x7fffffffffffffff
+0x7fffffff00000001
+0x00000000
+0xabcd800012340001
+0x00000000
+0xdeadbeef00000001
+0x1000000080000000
+0x3cfffe7f02807e01
+0x00000000
+0x808000ff800001
+0x1234ffffabcd7fff
+0x3c55feaa02817e
+0x10380bf7f40ffc3
+0x8000000000000000
+0xffffffffffffffff
+0xffffffff80000000
+0x00000000
+0xff80ffff00807fff
+0x00000000
+0xffff80007fffffff
+0x7fff8001ffffffff
+0x381bfaa4055c300
+0x00000000
+0x7fffabcdffff1234
+0x1ff8080000080
+EOF
+RUN
+
+NAME=arm64 ESIL uzp1 uzp2 vector lane deinterleaves
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 2018024e # uzp1 v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x7e02fe3cc340bf03
+aer v2h=0x01807fff0055aa81
+aes
+aer v0l
+aer v0h
+wx 2018c24e # uzp1 v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0000000000000001
+aer v1h=0x8000000000000000
+aer v2l=0x7fffffffffffffff
+aer v2h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+wx 2018820e # uzp1 v0.2s, v1.2s, v2.2s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0x0000000000000000
+aer v2l=0xffffffff7fffffff
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2018420e # uzp1 v0.4h, v1.4h, v2.4h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0x0000000000000000
+aer v2l=0xff800080abcd1234
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2018824e # uzp1 v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0xffffffff7fffffff
+aer v2l=0x10000000deadbeef
+aer v2h=0x7fff8001ffff8000
+aes
+aer v0l
+aer v0h
+wx 2018020e # uzp1 v0.8b, v1.8b, v2.8b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x0000000000000000
+aer v2l=0x03bf40c33cfe027e
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2018424e # uzp1 v0.8h, v1.8h, v2.8h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0xff800080abcd1234
+aer v2l=0x1234abcd0080ff80
+aer v2h=0x000180007fffffff
+aes
+aer v0l
+aer v0h
+wx 2058024e # uzp2 v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x7e02fe3cc340bf03
+aer v2h=0x01807fff0055aa81
+aes
+aer v0l
+aer v0h
+wx 2058c24e # uzp2 v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0000000000000001
+aer v1h=0x8000000000000000
+aer v2l=0x7fffffffffffffff
+aer v2h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+wx 2058820e # uzp2 v0.2s, v1.2s, v2.2s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0x0000000000000000
+aer v2l=0xffffffff7fffffff
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2058420e # uzp2 v0.4h, v1.4h, v2.4h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0x0000000000000000
+aer v2l=0xff800080abcd1234
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2058824e # uzp2 v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0xffffffff7fffffff
+aer v2l=0x10000000deadbeef
+aer v2h=0x7fff8001ffff8000
+aes
+aer v0l
+aer v0h
+wx 2058020e # uzp2 v0.8b, v1.8b, v2.8b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x0000000000000000
+aer v2l=0x03bf40c33cfe027e
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2058424e # uzp2 v0.8h, v1.8h, v2.8h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0xff800080abcd1234
+aer v2l=0x1234abcd0080ff80
+aer v2h=0x000180007fffffff
+aes
+aer v0l
+aer v0h
+wx 2058404e # uzp2 v0.8h, v1.8h, v0.8h
+aei
+aeip
+aer v0l=0x1234abcd0080ff80
+aer v0h=0x000180007fffffff
+aer v1l=0xffff7fff80000001
+aer v1h=0xff800080abcd1234
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xbfc3fe7eaa007f01
+0x80ff5581023c4003
+0x00000001
+0x7fffffffffffffff
+0x7fffffff00000001
+0x00000000
+0x8012347fff0001
+0x00000000
+0x7fffffff00000001
+0xffff8000deadbeef
+0xbfc3fe7eaa007f01
+0x00000000
+0x8012347fff0001
+0x8000ffffabcdff80
+0x3403c028155ff80
+0x17f00aa7efec3bf
+0x8000000000000000
+0xffffffffffffffff
+0xffffffff80000000
+0x00000000
+0xff80abcdffff8000
+0x00000000
+0xffffffff80000000
+0x7fff800110000000
+0x3403c028155ff80
+0x00000000
+0xff80abcdffff8000
+0x17fff12340080
+0xff80abcdffff8000
+0x17fff12340080
+EOF
+RUN
+
+NAME=arm64 ESIL trn1 trn2 vector lane transposes
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 2028024e # trn1 v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x7e02fe3cc340bf03
+aer v2h=0x01807fff0055aa81
+aes
+aer v0l
+aer v0h
+wx 2028c24e # trn1 v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0000000000000001
+aer v1h=0x8000000000000000
+aer v2l=0x7fffffffffffffff
+aer v2h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+wx 2028820e # trn1 v0.2s, v1.2s, v2.2s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0x0000000000000000
+aer v2l=0xffffffff7fffffff
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2028420e # trn1 v0.4h, v1.4h, v2.4h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0x0000000000000000
+aer v2l=0xff800080abcd1234
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2028824e # trn1 v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0xffffffff7fffffff
+aer v2l=0x10000000deadbeef
+aer v2h=0x7fff8001ffff8000
+aes
+aer v0l
+aer v0h
+wx 0028804e # trn1 v0.4s, v0.4s, v0.4s
+aei
+aeip
+aer v0l=0x8000000000000001
+aer v0h=0xffffffff7fffffff
+aer v1l=0xbbbbbbbbbbbbbbbb
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 2028020e # trn1 v0.8b, v1.8b, v2.8b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x0000000000000000
+aer v2l=0x03bf40c33cfe027e
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2028424e # trn1 v0.8h, v1.8h, v2.8h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0xff800080abcd1234
+aer v2l=0x1234abcd0080ff80
+aer v2h=0x000180007fffffff
+aes
+aer v0l
+aer v0h
+wx 2068024e # trn2 v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x7e02fe3cc340bf03
+aer v2h=0x01807fff0055aa81
+aes
+aer v0l
+aer v0h
+wx 2068c24e # trn2 v0.2d, v1.2d, v2.2d
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0000000000000001
+aer v1h=0x8000000000000000
+aer v2l=0x7fffffffffffffff
+aer v2h=0xffffffffffffffff
+aes
+aer v0l
+aer v0h
+wx 2068820e # trn2 v0.2s, v1.2s, v2.2s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0x0000000000000000
+aer v2l=0xffffffff7fffffff
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2068420e # trn2 v0.4h, v1.4h, v2.4h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0x0000000000000000
+aer v2l=0xff800080abcd1234
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2068824e # trn2 v0.4s, v1.4s, v2.4s
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000001
+aer v1h=0xffffffff7fffffff
+aer v2l=0x10000000deadbeef
+aer v2h=0x7fff8001ffff8000
+aes
+aer v0l
+aer v0h
+wx 2068020e # trn2 v0.8b, v1.8b, v2.8b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x0000000000000000
+aer v2l=0x03bf40c33cfe027e
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2068424e # trn2 v0.8h, v1.8h, v2.8h
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffff7fff80000001
+aer v1h=0xff800080abcd1234
+aer v2l=0x1234abcd0080ff80
+aer v2h=0x000180007fffffff
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x2aa3c00407f0301
+0x80bfffc355fe817e
+0x00000001
+0x7fffffffffffffff
+0x7fffffff00000001
+0x00000000
+0x807fff12340001
+0x00000000
+0xdeadbeef00000001
+0xffff80007fffffff
+0x100000001
+0x7fffffff7fffffff
+0xbfaac300fe7f7e01
+0x00000000
+0xabcd7fffff800001
+0x80000080ffff1234
+0x7e81fe55c3ffbf80
+0x1037f40003caa02
+0x8000000000000000
+0xffffffffffffffff
+0xffffffff80000000
+0x00000000
+0xff80ffffabcd8000
+0x00000000
+0x1000000080000000
+0x7fff8001ffffffff
+0x38140553cff0280
+0x00000000
+0x1234ffff00808000
+0x1ff807fffabcd
+EOF
+RUN
+
+NAME=arm64 ESIL ext vector byte extract from pair of vectors
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 2000026e # ext v0.16b, v1.16b, v2.16b, #0
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2008026e # ext v0.16b, v1.16b, v2.16b, #1
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2050026e # ext v0.16b, v1.16b, v2.16b, #10
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2058026e # ext v0.16b, v1.16b, v2.16b, #11
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2060026e # ext v0.16b, v1.16b, v2.16b, #12
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2068026e # ext v0.16b, v1.16b, v2.16b, #13
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2070026e # ext v0.16b, v1.16b, v2.16b, #14
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2078026e # ext v0.16b, v1.16b, v2.16b, #15
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2010026e # ext v0.16b, v1.16b, v2.16b, #2
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2018026e # ext v0.16b, v1.16b, v2.16b, #3
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2020026e # ext v0.16b, v1.16b, v2.16b, #4
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2028026e # ext v0.16b, v1.16b, v2.16b, #5
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2030026e # ext v0.16b, v1.16b, v2.16b, #6
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2038026e # ext v0.16b, v1.16b, v2.16b, #7
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2040026e # ext v0.16b, v1.16b, v2.16b, #8
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 2048026e # ext v0.16b, v1.16b, v2.16b, #9
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x81aa5500ff7f8001
+aer v1h=0x03bf40c33cfe027e
+aer v2l=0x84ff0001fe7e8104
+aer v2h=0x0a3ec14ab5fb077b
+aes
+aer v0l
+aer v0h
+wx 0048006e # ext v0.16b, v0.16b, v0.16b, #9
+aei
+aeip
+aer v0l=0x81aa5500ff7f8001
+aer v0h=0x03bf40c33cfe027e
+aer v1l=0xbbbbbbbbbbbbbbbb
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v2l=0xbbbbbbbbbbbbbbbb
+aer v2h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 2000022e # ext v0.8b, v1.8b, v2.8b, #0
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x2a55ff7f01800ff0
+aer v1h=0x0000000000000000
+aer v2l=0x700fa5255bda55aa
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2008022e # ext v0.8b, v1.8b, v2.8b, #1
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x2a55ff7f01800ff0
+aer v1h=0x0000000000000000
+aer v2l=0x700fa5255bda55aa
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2010022e # ext v0.8b, v1.8b, v2.8b, #2
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x2a55ff7f01800ff0
+aer v1h=0x0000000000000000
+aer v2l=0x700fa5255bda55aa
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2018022e # ext v0.8b, v1.8b, v2.8b, #3
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x2a55ff7f01800ff0
+aer v1h=0x0000000000000000
+aer v2l=0x700fa5255bda55aa
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2020022e # ext v0.8b, v1.8b, v2.8b, #4
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x2a55ff7f01800ff0
+aer v1h=0x0000000000000000
+aer v2l=0x700fa5255bda55aa
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2028022e # ext v0.8b, v1.8b, v2.8b, #5
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x2a55ff7f01800ff0
+aer v1h=0x0000000000000000
+aer v2l=0x700fa5255bda55aa
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2030022e # ext v0.8b, v1.8b, v2.8b, #6
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x2a55ff7f01800ff0
+aer v1h=0x0000000000000000
+aer v2l=0x700fa5255bda55aa
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+wx 2038022e # ext v0.8b, v1.8b, v2.8b, #7
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x2a55ff7f01800ff0
+aer v1h=0x0000000000000000
+aer v2l=0x700fa5255bda55aa
+aer v2h=0x0000000000000000
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x81aa5500ff7f8001
+0x3bf40c33cfe027e
+0x7e81aa5500ff7f80
+0x403bf40c33cfe02
+0x810403bf40c33cfe
+0x77b84ff0001fe7e
+0x7e810403bf40c33c
+0xfb077b84ff0001fe
+0xfe7e810403bf40c3
+0xb5fb077b84ff0001
+0x1fe7e810403bf40
+0x4ab5fb077b84ff00
+0x1fe7e810403bf
+0xc14ab5fb077b84ff
+0xff0001fe7e810403
+0x3ec14ab5fb077b84
+0x27e81aa5500ff7f
+0x810403bf40c33cfe
+0xfe027e81aa5500ff
+0x7e810403bf40c33c
+0x3cfe027e81aa5500
+0xfe7e810403bf40c3
+0xc33cfe027e81aa55
+0x1fe7e810403bf40
+0x40c33cfe027e81aa
+0x1fe7e810403bf
+0xbf40c33cfe027e81
+0xff0001fe7e810403
+0x3bf40c33cfe027e
+0x84ff0001fe7e8104
+0x403bf40c33cfe02
+0x7b84ff0001fe7e81
+0x103bf40c33cfe02
+0x7e81aa5500ff7f80
+0x2a55ff7f01800ff0
+0x00000000
+0xaa2a55ff7f01800f
+0x00000000
+0x55aa2a55ff7f0180
+0x00000000
+0xda55aa2a55ff7f01
+0x00000000
+0x5bda55aa2a55ff7f
+0x00000000
+0x255bda55aa2a55ff
+0x00000000
+0xa5255bda55aa2a55
+0x00000000
+0xfa5255bda55aa2a
+0x00000000
+EOF
+RUN
