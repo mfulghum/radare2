@@ -4313,6 +4313,152 @@ static void arm64_esil_vec_satmixed(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// EOR3/BCAX/BSL/BIF/BIT: whole-register bitwise forms, worked per half
+static void arm64_esil_vec_bit3(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst;
+	const char *x, *y, *z;
+	int esize, lanes, r, argc = OPCOUNT64 ();
+	bool q;
+	if (argc < 3 || argc > 4) {
+		return;
+	}
+	for (r = 0; r < argc; r++) {
+		if (!ISREG64 (r) || !is_vector_op (&INSOP64 (r))) {
+			return;
+		}
+	}
+	dst = INSOP64 (0);
+	esize = vector_size (&dst);
+	lanes = vas_count (dst.vas);
+	for (r = 1; r < argc; r++) {
+		if (vector_size (&INSOP64 (r)) != esize || vas_count (INSOP64 (r).vas) != lanes) {
+			return;
+		}
+	}
+	q = esize * lanes == 128;
+	switch (insn->id) {
+	case ARM64_INS_EOR3:
+		x = REG64 (1);
+		y = REG64 (2);
+		z = REG64 (3);
+		break;
+	case ARM64_INS_BCAX:
+		x = REG64 (1);
+		y = REG64 (2);
+		z = REG64 (3);
+		break;
+	case ARM64_INS_BIF:
+	case ARM64_INS_BIT:
+		x = REG64 (0);
+		y = REG64 (1);
+		z = REG64 (2);
+		break;
+	case ARM64_INS_BSL:
+		x = REG64 (2);
+		y = REG64 (1);
+		z = REG64 (0);
+		break;
+	default:
+		return;
+	}
+	for (r = 0; r < (q? 2: 1); r++) {
+		const char *half = r? "h": "l";
+		if (r > 0) {
+			COMMA (&op->esil);
+		}
+		switch (insn->id) {
+		case ARM64_INS_EOR3:
+			r_strbuf_appendf (&op->esil, "%s%s,%s%s,%s%s,^,^,%s%s,=",
+				x, half, y, half, z, half, REG64 (0), half);
+			break;
+		case ARM64_INS_BCAX:
+			r_strbuf_appendf (&op->esil, "%s%s,%s%s,%s%s,0x%" PFMT64x ",^,&,^,%s%s,=",
+				x, half, y, half, z, half, UT64_MAX, REG64 (0), half);
+			break;
+		case ARM64_INS_BIF:
+			r_strbuf_appendf (&op->esil, "%s%s,%s%s,^,%s%s,0x%" PFMT64x ",^,&,%s%s,^,%s%s,=",
+				x, half, y, half, z, half, UT64_MAX, x, half, REG64 (0), half);
+			break;
+		case ARM64_INS_BIT:
+			r_strbuf_appendf (&op->esil, "%s%s,%s%s,^,%s%s,&,%s%s,^,%s%s,=",
+				x, half, y, half, z, half, x, half, REG64 (0), half);
+			break;
+		default: // BSL
+			r_strbuf_appendf (&op->esil, "%s%s,%s%s,^,%s%s,&,%s%s,^,%s%s,=",
+				x, half, y, half, z, half, x, half, REG64 (0), half);
+			break;
+		}
+	}
+}
+
+// PMULL/PMULL2: carryless multiplies; the byte form works per 16-bit
+// destination lane, the 64-to-128 form folds the bit terms into the two
+// destination halves
+static void arm64_esil_vec_pmull(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	bool upper;
+	int i, t;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (!is_vector_op (&dst) || !is_vector_op (&src) || !is_vector_op (&src2)) {
+		return;
+	}
+	upper = insn->id == ARM64_INS_PMULL2;
+	if (vector_size (&dst) == 128 && vas_count (dst.vas) == 1 &&
+		vector_size (&src) == 64 && vector_size (&src2) == 64) {
+		const char *a = REG64 (1);
+		const char *b = REG64 (2);
+		RStrBuf lo, hi;
+		r_strbuf_init (&lo);
+		r_strbuf_init (&hi);
+		for (t = 0; t < 64; t++) {
+			r_strbuf_appendf (&lo, "%s%d,%s%s,>>,1,&,%d,%s%s,<<,*%s",
+				t? ",": "", t, b, "l", t, a, "l", t? ",^": "");
+			if (t > 0) {
+				r_strbuf_appendf (&hi, "%s%d,%s%s,>>,1,&,%d,%s%s,>>,*%s",
+					t > 1? ",": "", t, b, "l", 64 - t, a, "l", t > 1? ",^": "");
+			}
+		}
+		r_strbuf_setf (&op->esil, "%s,%sl,=,%s,%sh,=",
+			r_strbuf_get (&lo), REG64 (0), r_strbuf_get (&hi), REG64 (0));
+		r_strbuf_fini (&lo);
+		r_strbuf_fini (&hi);
+		return;
+	}
+	if (vector_size (&src) != 8 || vector_size (&src2) != 8 ||
+		vector_size (&dst) != 16 || vas_count (dst.vas) != 8 ||
+		vas_count (src.vas) < (upper? 16: 8) || vas_count (src2.vas) < (upper? 16: 8)) {
+		return;
+	}
+	for (i = 0; i < 8; i++) {
+		RStrBuf lane_a, lane_b, terms;
+		int j = i + (upper? 8: 0);
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		r_strbuf_init (&terms);
+		VECARG64_APPEND (&lane_a, 1, j, 0);
+		VECARG64_APPEND (&lane_b, 2, j, 0);
+		for (t = 0; t < 8; t++) {
+			r_strbuf_appendf (&terms, "%s%d,%s,>>,1,&,%d,%s,<<,*%s",
+				t? ",": "", t, r_strbuf_get (&lane_b), t, r_strbuf_get (&lane_a),
+				t? ",^": "");
+		}
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_appendf (&op->esil, "%s,", r_strbuf_get (&terms));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		r_strbuf_fini (&terms);
+	}
+}
+
 // SADDLP/UADDLP/SADALP/UADALP: add adjacent narrow pairs into wide lanes,
 // accumulating into the destination in the ALP forms
 static void arm64_esil_vec_pwl(RAnalOp *op, csh *handle, cs_insn *insn) {
@@ -5781,6 +5927,17 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_USQADD:
 		arm64_esil_vec_satmixed (op, handle, insn);
 		break;
+	case ARM64_INS_EOR3:
+	case ARM64_INS_BCAX:
+	case ARM64_INS_BSL:
+	case ARM64_INS_BIF:
+	case ARM64_INS_BIT:
+		arm64_esil_vec_bit3 (op, handle, insn);
+		break;
+	case ARM64_INS_PMULL:
+	case ARM64_INS_PMULL2:
+		arm64_esil_vec_pmull (op, handle, insn);
+		break;
 	case ARM64_INS_SADDLP:
 	case ARM64_INS_UADDLP:
 	case ARM64_INS_SADALP:
@@ -7190,6 +7347,8 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_FNMUL:
 	case ARM64_INS_FMULX:
 	case ARM64_INS_UMULL:
+	case ARM64_INS_PMULL:
+	case ARM64_INS_PMULL2:
 		/* TODO: if next instruction is also a MUL, cycles are /=2 */
 		/* also known as Register Indexing Addressing */
 		op->cycles = 4;
@@ -7287,6 +7446,9 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_UADDLP:
 	case ARM64_INS_SADALP:
 	case ARM64_INS_UADALP:
+	case ARM64_INS_BIT:
+	case ARM64_INS_BIF:
+	case ARM64_INS_BSL:
 	case ARM64_INS_SABD:
 	case ARM64_INS_SHADD:
 	case ARM64_INS_SHSUB:
@@ -7487,6 +7649,8 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		break;
 	case ARM64_INS_EOR:
 	case ARM64_INS_EON:
+	case ARM64_INS_EOR3:
+	case ARM64_INS_BCAX:
 		op->type = R_ANAL_OP_TYPE_XOR;
 		break;
 	case ARM64_INS_STRB:

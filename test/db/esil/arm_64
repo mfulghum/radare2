@@ -9334,3 +9334,273 @@ EXPECT=<<EOF
 0xff810000ffff1233
 EOF
 RUN
+
+NAME=arm64 ESIL eor3 bcax three source bitwise operations
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 200c22ce # bcax v0.16b, v1.16b, v2.16b, v3.16b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0123456789abcdef
+aer v1h=0xf0f0f0f0f0f0f0f0
+aer v2l=0xfedcba9876543210
+aer v2h=0x0f0f0f0f0f0f0f0f
+aer v3l=0x8899aabbccddeeff
+aer v3h=0x1122334455667788
+aes
+aer v0l
+aer v0h
+wx 200c02ce # eor3 v0.16b, v1.16b, v2.16b, v3.16b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0123456789abcdef
+aer v1h=0xf0f0f0f0f0f0f0f0
+aer v2l=0xfedcba9876543210
+aer v2h=0x0f0f0f0f0f0f0f0f
+aer v3l=0x8899aabbccddeeff
+aer v3h=0x1122334455667788
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x77675567bbabddef
+0xfefdfcfbfaf9f8f7
+0x7766554433221100
+0xeeddccbbaa998877
+EOF
+RUN
+
+NAME=arm64 ESIL bif bit bsl bitwise select
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 201ce26e # bif v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xaaaaaaaaaaaaaaaa
+aer v0h=0x5555555555555555
+aer v1l=0x0123456789abcdef
+aer v1h=0xf0f0f0f0f0f0f0f0
+aer v2l=0xfedcba9876543210
+aer v2h=0x0f0f0f0f0f0f0f0f
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 201ce26e # bif v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xffffffffffffffff
+aer v0h=0x0000000000000000
+aer v1l=0x8899aabbccddeeff
+aer v1h=0x1122334455667788
+aer v2l=0x0123456789abcdef
+aer v2h=0xf0f0f0f0f0f0f0f0
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 201ca26e # bit v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xaaaaaaaaaaaaaaaa
+aer v0h=0x5555555555555555
+aer v1l=0x0123456789abcdef
+aer v1h=0xf0f0f0f0f0f0f0f0
+aer v2l=0xfedcba9876543210
+aer v2h=0x0f0f0f0f0f0f0f0f
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 201ca26e # bit v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xffffffffffffffff
+aer v0h=0x0000000000000000
+aer v1l=0x8899aabbccddeeff
+aer v1h=0x1122334455667788
+aer v2l=0x0123456789abcdef
+aer v2h=0xf0f0f0f0f0f0f0f0
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 201c626e # bsl v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xaaaaaaaaaaaaaaaa
+aer v0h=0x5555555555555555
+aer v1l=0x0123456789abcdef
+aer v1h=0xf0f0f0f0f0f0f0f0
+aer v2l=0xfedcba9876543210
+aer v2h=0x0f0f0f0f0f0f0f0f
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 201c626e # bsl v0.16b, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xffffffffffffffff
+aer v0h=0x0000000000000000
+aer v1l=0x8899aabbccddeeff
+aer v1h=0x1122334455667788
+aer v2l=0x0123456789abcdef
+aer v2h=0xf0f0f0f0f0f0f0f0
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0xababefefababefef
+0xf5f5f5f5f5f5f5f5
+0x89bbefffcdffefff
+0x102030405060708
+0x22002288aa88aa
+0x5050505050505050
+0xfeddbabbfeddfeff
+0x1020304050607080
+0x54761032dcfe98ba
+0x5a5a5a5a5a5a5a5a
+0x8899aabbccddeeff
+0xf0f0f0f0f0f0f0f0
+EOF
+RUN
+
+NAME=arm64 ESIL pmull pmull2 carryless polynomial multiplies
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+CMDS=<<EOF
+e hex.header=false
+wx 20e0224e # pmull2 v0.8h, v1.16b, v2.16b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0123456789abcdef
+aer v1h=0xfedcba9876543210
+aer v2l=0xff00ff00ff00ff00
+aer v2h=0x0ff00ff00ff00ff0
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20e0e20e # pmull v0.1q, v1.1d, v2.1d
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0123456789abcdef
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v2l=0xfedcba9876543210
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20e0e20e # pmull v0.1q, v1.1d, v2.1d
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0xffffffffffffffff
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v2l=0x8000000000000001
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20e0e20e # pmull v0.1q, v1.1d, v2.1d
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8000000000000000
+aer v1h=0xbbbbbbbbbbbbbbbb
+aer v2l=0xffffffffffffffff
+aer v2h=0xbbbbbbbbbbbbbbbb
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20e0220e # pmull v0.8h, v1.8b, v2.8b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0123456789abcdef
+aer v1h=0xfedcba9876543210
+aer v2l=0xff00ff00ff00ff00
+aer v2h=0x0ff00ff00ff00ff0
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20e0220e # pmull v0.8h, v1.8b, v2.8b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x0011223344556677
+aer v1h=0x8899aabbccddeeff
+aer v2l=0xff00ff00ff00ff00
+aer v2h=0x0ff00ff00ff00ff0
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+wx 20e0220e # pmull v0.8h, v1.8b, v2.8b
+aei
+aeip
+aer v0l=0xbbbbbbbbbbbbbbbb
+aer v0h=0xbbbbbbbbbbbbbbbb
+aer v1l=0x8182838485868788
+aer v1h=0x0102030405060708
+aer v2l=0x0102030405060708
+aer v2h=0x8182838485868788
+aer v3l=0xbbbbbbbbbbbbbbbb
+aer v3h=0xbbbbbbbbbbbbbbbb
+aes
+aer v0l
+aer v0h
+EOF
+EXPECT=<<EOF
+0x2f230c0010e0f00
+0x50a4f4006f67080
+0x40a0789828c810f0
+0xe038d8688850b0
+0x7fffffffffffffff
+0x7fffffffffffffff
+0x8000000000000000
+0x7fffffffffffffff
+0x7887000044bb0000
+0xff00003cc30000
+0x3c3c000022220000
+0x1e1e0000
+0x291031403950440
+0x81010401850210
+EOF
+RUN
