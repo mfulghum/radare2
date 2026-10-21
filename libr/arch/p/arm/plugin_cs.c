@@ -3672,6 +3672,180 @@ static void arm64_esil_vec_pdp(RAnalOp *op, csh *handle, cs_insn *insn, bool fp)
 	}
 }
 
+// MLA/MLS: the per-lane product of the sources is added to or subtracted
+// from the destination lane; by-element forms fold the element index into
+// the second source through vector64_append
+static void arm64_esil_vec_mac(RAnalOp *op, csh *handle, cs_insn *insn, bool sub) {
+	cs_arm64_op dst, src, src2;
+	int esize, lanes, i;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (!is_vector_op (&dst) || !is_vector_op (&src) || !is_vector_op (&src2)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (esize < 8 || esize > 32 || vector_size (&dst) != esize ||
+		vas_count (dst.vas) != lanes || vector_size (&src2) != esize) {
+		return;
+	}
+	for (i = 0; i < lanes; i++) {
+		RStrBuf prod, factor, acc;
+		r_strbuf_init (&prod);
+		r_strbuf_init (&factor);
+		r_strbuf_init (&acc);
+		VECARG64_APPEND (&prod, 1, i, 0);
+		VECARG64_APPEND (&factor, 2, i, 0);
+		VECARG64_APPEND (&acc, 0, i, 0);
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_appendf (&op->esil, "%s,%s,*,%s,%c,",
+			r_strbuf_get (&factor), r_strbuf_get (&prod), r_strbuf_get (&acc),
+			sub? '-': '+');
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&prod);
+		r_strbuf_fini (&factor);
+		r_strbuf_fini (&acc);
+	}
+}
+
+// SMIN/SMAX/UMIN/UMAX: per-lane selection through the VM compare; the signed
+// forms flip the sign bit so the 64-bit signed compare orders the lanes
+static void arm64_esil_vec_minmax_int(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	const char *a, *b;
+	ut64 sb;
+	bool sgn, ismin;
+	int esize, lanes, i;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (!is_vector_op (&dst) || !is_vector_op (&src) || !is_vector_op (&src2)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (esize < 8 || esize > 32 || vector_size (&dst) != esize ||
+		vas_count (dst.vas) != lanes || vector_size (&src2) != esize ||
+		vas_count (src2.vas) != lanes) {
+		return;
+	}
+	sgn = false;
+	ismin = false;
+	switch (insn->id) {
+	case ARM64_INS_SMIN:
+		sgn = true;
+		ismin = true;
+		break;
+	case ARM64_INS_SMAX:
+		sgn = true;
+		break;
+	case ARM64_INS_UMIN:
+		ismin = true;
+		break;
+	case ARM64_INS_UMAX:
+		break;
+	default:
+		return;
+	}
+	sb = 1ULL << (esize - 1);
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		VECARG64_APPEND (&lane_b, 2, i, 0);
+		a = r_strbuf_get (&lane_a);
+		b = r_strbuf_get (&lane_b);
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		if (sgn) {
+			r_strbuf_appendf (&op->esil, "%s,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,%c,?{,%s,}{,%s,},",
+				b, sb, a, sb, ismin? '<': '>', a, b);
+		} else {
+			r_strbuf_appendf (&op->esil, "%s,%s,%c,?{,%s,}{,%s,},",
+				b, a, ismin? '<': '>', a, b);
+		}
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+	}
+}
+
+// SABD/UABD: absolute per-lane difference; d < 0 is detected by comparing
+// the raw lanes (unsigned) or the flipped lanes (signed) and folded back as
+// (d ^ m) + p through the 0/-1 sign mask
+static void arm64_esil_vec_absdiff(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	const char *a, *b;
+	ut64 sb;
+	bool sgn;
+	int esize, lanes, i;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (!is_vector_op (&dst) || !is_vector_op (&src) || !is_vector_op (&src2)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (esize < 8 || esize > 32 || vector_size (&dst) != esize ||
+		vas_count (dst.vas) != lanes || vector_size (&src2) != esize ||
+		vas_count (src2.vas) != lanes) {
+		return;
+	}
+	switch (insn->id) {
+	case ARM64_INS_SABD:
+		sgn = true;
+		break;
+	case ARM64_INS_UABD:
+		sgn = false;
+		break;
+	default:
+		return;
+	}
+	sb = 1ULL << (esize - 1);
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b, neg;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		r_strbuf_init (&neg);
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		VECARG64_APPEND (&lane_b, 2, i, 0);
+		a = r_strbuf_get (&lane_a);
+		b = r_strbuf_get (&lane_b);
+		if (sgn) {
+			r_strbuf_appendf (&neg, "%s,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,<", a, sb, b, sb);
+		} else {
+			r_strbuf_appendf (&neg, "%s,%s,<", a, b);
+		}
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_appendf (&op->esil, "%s,%s,-,%s,0,-,^,%s,+,",
+			a, b, r_strbuf_get (&neg), r_strbuf_get (&neg));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		r_strbuf_fini (&neg);
+	}
+}
+
 // SADDLP/UADDLP/SADALP/UADALP: add adjacent narrow pairs into wide lanes,
 // accumulating into the destination in the ALP forms
 static void arm64_esil_vec_pwl(RAnalOp *op, csh *handle, cs_insn *insn) {
@@ -5101,6 +5275,22 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 		break;
 	case ARM64_INS_FADDP:
 		arm64_esil_vec_pdp (op, handle, insn, true);
+		break;
+	case ARM64_INS_MLA:
+		arm64_esil_vec_mac (op, handle, insn, false);
+		break;
+	case ARM64_INS_MLS:
+		arm64_esil_vec_mac (op, handle, insn, true);
+		break;
+	case ARM64_INS_SMIN:
+	case ARM64_INS_SMAX:
+	case ARM64_INS_UMIN:
+	case ARM64_INS_UMAX:
+		arm64_esil_vec_minmax_int (op, handle, insn);
+		break;
+	case ARM64_INS_SABD:
+	case ARM64_INS_UABD:
+		arm64_esil_vec_absdiff (op, handle, insn);
 		break;
 	case ARM64_INS_SADDLP:
 	case ARM64_INS_UADDLP:
@@ -6551,6 +6741,8 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_FNMADD:
 	case ARM64_INS_FMLA:
 	case ARM64_INS_FMLS:
+	case ARM64_INS_MLA:
+	case ARM64_INS_MLS:
 	case ARM64_INS_MADD:
 #if CS_API_MAJOR >= 6
 	case ARM64_INS_MADDPT:
@@ -6606,6 +6798,12 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_UADDLP:
 	case ARM64_INS_SADALP:
 	case ARM64_INS_UADALP:
+	case ARM64_INS_SABD:
+	case ARM64_INS_SMAX:
+	case ARM64_INS_SMIN:
+	case ARM64_INS_UABD:
+	case ARM64_INS_UMAX:
+	case ARM64_INS_UMIN:
 	case ARM64_INS_MOVK:
 	case ARM64_INS_MOVN:
 	case ARM64_INS_SMOV:
