@@ -3478,7 +3478,8 @@ static void arm64_esil_vec_reduceint(RAnalOp *op, csh *handle, cs_insn *insn) {
 	vnum = atoi (dname + 1);
 	esize = vector_size (&src);
 	lanes = vas_count (src.vas);
-	if (vnum < 0 || vnum > 31 || esize < 8 || esize > 64 || lanes < 2 || lanes * esize > 128) {
+	// the integer *V reductions are half+single only, no .2d/.1d forms
+	if (vnum < 0 || vnum > 31 || esize < 8 || esize > 32 || lanes < 2 || lanes * esize > 128) {
 		return;
 	}
 	sum = false;
@@ -7446,10 +7447,12 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		break;
 	case ARM64_INS_MUL:
 	case ARM64_INS_SMULL:
+	case ARM64_INS_SMULL2:
 	case ARM64_INS_FMUL:
 	case ARM64_INS_FNMUL:
 	case ARM64_INS_FMULX:
 	case ARM64_INS_UMULL:
+	case ARM64_INS_UMULL2:
 	case ARM64_INS_PMULL:
 	case ARM64_INS_PMULL2:
 		/* TODO: if next instruction is also a MUL, cycles are /=2 */
@@ -7545,6 +7548,15 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_FMINNMV:
 	case ARM64_INS_ADDP:
 	case ARM64_INS_FADDP:
+	case ARM64_INS_FABS:
+	case ARM64_INS_FMIN:
+	case ARM64_INS_FMAX:
+	case ARM64_INS_FMINNM:
+	case ARM64_INS_FMAXNM:
+	case ARM64_INS_FMINP:
+	case ARM64_INS_FMAXP:
+	case ARM64_INS_FMINNMP:
+	case ARM64_INS_FMAXNMP:
 	case ARM64_INS_SADDLP:
 	case ARM64_INS_UADDLP:
 	case ARM64_INS_SADALP:
@@ -7649,6 +7661,7 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_REV64:
 	case ARM64_INS_REV16:
 	case ARM64_INS_REV32:
+	case ARM64_INS_RBIT:
 	case ARM64_INS_EXT:
 	case ARM64_INS_INS:
 		op->type = R_ANAL_OP_TYPE_MOV;
@@ -7657,6 +7670,16 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		op->cycles = 1;
 		/* fallthru */
 	case ARM64_INS_SHL:
+	case ARM64_INS_SLI:
+	case ARM64_INS_SSHL:
+	case ARM64_INS_USHL:
+	case ARM64_INS_SQSHL:
+	case ARM64_INS_SQSHLU:
+	case ARM64_INS_SRSHL:
+	case ARM64_INS_SQRSHL:
+	case ARM64_INS_UQSHL:
+	case ARM64_INS_URSHL:
+	case ARM64_INS_UQRSHL:
 	case ARM64_INS_SSHLL:
 	case ARM64_INS_SSHLL2:
 	case ARM64_INS_USHLL:
@@ -7665,6 +7688,11 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 		break;
 	case ARM64_INS_LSR:
 		op->cycles = 1;
+		op->type = R_ANAL_OP_TYPE_SHR;
+		break;
+	case ARM64_INS_SSHR:
+	case ARM64_INS_USHR:
+	case ARM64_INS_SRI:
 		op->type = R_ANAL_OP_TYPE_SHR;
 		break;
 	case ARM64_INS_SHRN:
@@ -7703,6 +7731,7 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_NEG:
 	case ARM64_INS_NEGS:
 	case ARM64_INS_FNEG:
+	case ARM64_INS_MVN:
 		op->type = R_ANAL_OP_TYPE_NOT;
 		break;
 	case ARM64_INS_FCVT:
@@ -7720,6 +7749,13 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_FCVTPU:
 	case ARM64_INS_FCVTZS:
 	case ARM64_INS_FCVTZU:
+	case ARM64_INS_FRINTA:
+	case ARM64_INS_FRINTI:
+	case ARM64_INS_FRINTM:
+	case ARM64_INS_FRINTN:
+	case ARM64_INS_FRINTP:
+	case ARM64_INS_FRINTX:
+	case ARM64_INS_FRINTZ:
 	case ARM64_INS_SCVTF:
 	case ARM64_INS_UCVTF:
 		op->type = R_ANAL_OP_TYPE_CAST;
