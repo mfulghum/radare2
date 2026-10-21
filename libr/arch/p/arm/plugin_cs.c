@@ -3846,6 +3846,473 @@ static void arm64_esil_vec_absdiff(RAnalOp *op, csh *handle, cs_insn *insn) {
 	}
 }
 
+// SHADD/UHADD/SRHADD/URHADD/SHSUB/UHSUB: halving adds and subtracts; the
+// rounding forms add one unit before the shift and the signed forms shift
+// the sign-extended result arithmetically
+static void arm64_esil_vec_halving(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	ut64 se, signbit;
+	bool un = false, round = false, sub = false;
+	int esize, lanes, i;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (!is_vector_op (&dst) || !is_vector_op (&src) || !is_vector_op (&src2)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (esize < 8 || esize > 32 || vector_size (&dst) != esize ||
+		vas_count (dst.vas) != lanes || vector_size (&src2) != esize ||
+		vas_count (src2.vas) != lanes) {
+		return;
+	}
+	switch (insn->id) {
+	case ARM64_INS_SHADD:
+		break;
+	case ARM64_INS_UHADD:
+		un = true;
+		break;
+	case ARM64_INS_SRHADD:
+		round = true;
+		break;
+	case ARM64_INS_URHADD:
+		un = true;
+		round = true;
+		break;
+	case ARM64_INS_SHSUB:
+		sub = true;
+		break;
+	case ARM64_INS_UHSUB:
+		un = true;
+		sub = true;
+		break;
+	default:
+		return;
+	}
+	se = 1ULL << (esize - 1);
+	signbit = 1ULL << 63;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b, sa, sb, bor, expr;
+		const char *a, *b;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		r_strbuf_init (&sa);
+		r_strbuf_init (&sb);
+		r_strbuf_init (&bor);
+		r_strbuf_init (&expr);
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		VECARG64_APPEND (&lane_b, 2, i, 0);
+		a = r_strbuf_get (&lane_a);
+		b = r_strbuf_get (&lane_b);
+		// the infinite-precision sum is floored-shifted and corrected by the
+		// signed-lane and carry/borrow contributions, one half unit each
+		if (un) {
+			if (sub) {
+				r_strbuf_appendf (&bor, "%s,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,<",
+					b, signbit, a, signbit);
+				r_strbuf_appendf (&expr, "%s,0x%" PFMT64x ",*,1,%s,%s,-,>>,-",
+					r_strbuf_get (&bor), signbit, b, a);
+			} else if (round) {
+				r_strbuf_appendf (&expr, "1,%s,%s,+,1,+,>>", a, b);
+			} else {
+				r_strbuf_appendf (&expr, "1,%s,%s,+,>>", a, b);
+			}
+		} else {
+			r_strbuf_appendf (&sa, "0x%" PFMT64x ",%s,&,!,!", se, a);
+			r_strbuf_appendf (&sb, "0x%" PFMT64x ",%s,&,!,!", se, b);
+			if (sub) {
+				r_strbuf_appendf (&bor, "%s,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,<",
+					b, signbit, a, signbit);
+				r_strbuf_appendf (&expr,
+					"%s,0x%" PFMT64x ",*,%s,%s,-,0x%" PFMT64x ",*,+,1,%s,%s,-,>>,-",
+					r_strbuf_get (&bor), signbit,
+					r_strbuf_get (&sb), r_strbuf_get (&sa), se, b, a);
+			} else if (round) {
+				r_strbuf_appendf (&expr, "%s,%s,+,0x%" PFMT64x ",*,1,%s,%s,+,1,+,>>,-",
+					r_strbuf_get (&sa), r_strbuf_get (&sb), se, a, b);
+			} else {
+				r_strbuf_appendf (&expr, "%s,%s,+,0x%" PFMT64x ",*,1,%s,%s,+,>>,-",
+					r_strbuf_get (&sa), r_strbuf_get (&sb), se, a, b);
+			}
+		}
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_appendf (&op->esil, "%s,", r_strbuf_get (&expr));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		r_strbuf_fini (&sa);
+		r_strbuf_fini (&sb);
+		r_strbuf_fini (&bor);
+		r_strbuf_fini (&expr);
+	}
+}
+
+// SQADD/UQADD/SQSUB/UQSUB: clamped per-lane adds and subtracts; the signed
+// forms compare in the sign-extended domain, except at 64-bit lanes where
+// the same-sign rule flags the wrapped sum; the unsigned forms at 64-bit
+// lanes flip the sign bit to keep the VM's signed compare unsigned-ordered
+static void arm64_esil_vec_satbin(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src, src2;
+	const char *a, *b;
+	ut64 mask, maxs, mins, maxu, signbit;
+	bool sgn, sub;
+	int esize, lanes, up, i;
+	if (OPCOUNT64 () != 3 || !ISREG64 (0) || !ISREG64 (1) || !ISREG64 (2)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	src2 = INSOP64 (2);
+	if (!is_vector_op (&dst) || !is_vector_op (&src) || !is_vector_op (&src2)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (esize < 8 || esize > 64 || (esize & (esize - 1)) ||
+		vector_size (&dst) != esize || vas_count (dst.vas) != lanes ||
+		vector_size (&src2) != esize || vas_count (src2.vas) != lanes) {
+		return;
+	}
+	sgn = false;
+	sub = false;
+	switch (insn->id) {
+	case ARM64_INS_SQADD:
+		sgn = true;
+		break;
+	case ARM64_INS_SQSUB:
+		sgn = true;
+		sub = true;
+		break;
+	case ARM64_INS_UQADD:
+		break;
+	case ARM64_INS_UQSUB:
+		sub = true;
+		break;
+	default:
+		return;
+	}
+	mask = esize == 64? UT64_MAX: ((1ULL << esize) - 1);
+	maxs = 1ULL << (esize - 1);
+	mins = maxs;
+	maxu = mask;
+	signbit = 1ULL << 63;
+	up = 64 - esize;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, lane_b, over_pos, over_neg, sum;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&lane_b);
+		r_strbuf_init (&over_pos);
+		r_strbuf_init (&over_neg);
+		r_strbuf_init (&sum);
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		VECARG64_APPEND (&lane_b, 2, i, 0);
+		a = r_strbuf_get (&lane_a);
+		b = r_strbuf_get (&lane_b);
+		if (sgn) {
+			if (esize < 64) {
+				const char *sa, *sb;
+				RStrBuf sext_a, sext_b;
+				r_strbuf_init (&sext_a);
+				r_strbuf_init (&sext_b);
+				r_strbuf_appendf (&sext_a, "%d,%d,%s,<<,ASR", up, up, a);
+				r_strbuf_appendf (&sext_b, "%d,%d,%s,<<,ASR", up, up, b);
+				sa = r_strbuf_get (&sext_a);
+				sb = r_strbuf_get (&sext_b);
+				if (sub) {
+					r_strbuf_appendf (&sum, "%s,%s,-", sb, sa);
+				} else {
+					r_strbuf_appendf (&sum, "%s,%s,+", sa, sb);
+				}
+				r_strbuf_appendf (&over_pos, "0x%" PFMT64x ",%s,>", maxs - 1, r_strbuf_get (&sum));
+				r_strbuf_appendf (&over_neg, "%s,0x%" PFMT64x ",>", r_strbuf_get (&sum),
+					UT64_MAX << (esize - 1));
+				r_strbuf_fini (&sext_a);
+				r_strbuf_fini (&sext_b);
+			} else {
+				// same-sign operands with an opposite-sign sum
+				RStrBuf n_a, n_b, n_s, sum_bits;
+				r_strbuf_init (&n_a);
+				r_strbuf_init (&n_b);
+				r_strbuf_init (&n_s);
+				r_strbuf_init (&sum_bits);
+				if (sub) {
+					r_strbuf_appendf (&sum_bits, "%s,%s,-", b, a);
+				} else {
+					r_strbuf_appendf (&sum_bits, "%s,%s,+", a, b);
+				}
+				r_strbuf_appendf (&n_a, "0x%" PFMT64x ",%s,&,!,!", signbit, a);
+				r_strbuf_appendf (&n_b, "0x%" PFMT64x ",%s,&,!,!", signbit, b);
+				r_strbuf_appendf (&n_s, "0x%" PFMT64x ",%s,&,!,!", signbit, r_strbuf_get (&sum_bits));
+				if (sub) {
+					r_strbuf_appendf (&over_pos, "%s,1,-,%s,*,%s,*",
+						r_strbuf_get (&n_a), r_strbuf_get (&n_b), r_strbuf_get (&n_s));
+					r_strbuf_appendf (&over_neg, "%s,%s,1,-,*,%s,1,-,*",
+						r_strbuf_get (&n_a), r_strbuf_get (&n_b), r_strbuf_get (&n_s));
+				} else {
+					r_strbuf_appendf (&over_pos, "%s,1,-,%s,1,-,*,%s,*",
+						r_strbuf_get (&n_a), r_strbuf_get (&n_b), r_strbuf_get (&n_s));
+					r_strbuf_appendf (&over_neg, "%s,%s,*,%s,1,-,*",
+						r_strbuf_get (&n_a), r_strbuf_get (&n_b), r_strbuf_get (&n_s));
+				}
+				r_strbuf_copy (&sum, &sum_bits);
+				r_strbuf_fini (&n_a);
+				r_strbuf_fini (&n_b);
+				r_strbuf_fini (&n_s);
+				r_strbuf_fini (&sum_bits);
+			}
+		} else {
+			RStrBuf sum_bits;
+			r_strbuf_init (&sum_bits);
+			if (sub) {
+				r_strbuf_appendf (&sum_bits, "%s,%s,-", b, a);
+			} else {
+				r_strbuf_appendf (&sum_bits, "%s,%s,+", a, b);
+			}
+			if (esize < 64) {
+				if (sub) {
+					r_strbuf_appendf (&over_pos, "%s,%s,>", a, b);
+				} else {
+					r_strbuf_appendf (&over_pos, "0x%" PFMT64x ",%s,>", maxu, r_strbuf_get (&sum_bits));
+				}
+			} else if (sub) {
+				r_strbuf_appendf (&over_pos, "%s,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,>",
+					a, signbit, b, signbit);
+			} else {
+				r_strbuf_appendf (&over_pos, "%s,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,<",
+					a, signbit, r_strbuf_get (&sum_bits), signbit);
+			}
+			r_strbuf_copy (&sum, &sum_bits);
+			r_strbuf_fini (&sum_bits);
+		}
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		if (sgn) {
+			r_strbuf_appendf (&op->esil,
+				"%s,0x%" PFMT64x ",*,%s,0x%" PFMT64x ",*,+,%s,0x%" PFMT64x ",&,%s,1,-,%s,1,-,*,*,+,",
+				r_strbuf_get (&over_pos), maxs - 1, r_strbuf_get (&over_neg), mins,
+				r_strbuf_get (&sum), mask,
+				r_strbuf_get (&over_pos), r_strbuf_get (&over_neg));
+		} else if (sub) {
+			r_strbuf_appendf (&op->esil, "%s,!,%s,0x%" PFMT64x ",&,*,",
+				r_strbuf_get (&over_pos), r_strbuf_get (&sum), mask);
+		} else {
+			r_strbuf_appendf (&op->esil,
+				"%s,0x%" PFMT64x ",*,%s,!,%s,0x%" PFMT64x ",&,*,+,",
+				r_strbuf_get (&over_pos), maxu, r_strbuf_get (&over_pos),
+				r_strbuf_get (&sum), mask);
+		}
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&lane_b);
+		r_strbuf_fini (&over_pos);
+		r_strbuf_fini (&over_neg);
+		r_strbuf_fini (&sum);
+	}
+}
+
+// SQABS/SQNEG: saturating per-lane absolute value and negation; the minimum
+// lane maps to the maximum through the raw-bit equality probe
+static void arm64_esil_vec_satunary(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src;
+	const char *a;
+	ut64 maxs, mins, lsb;
+	bool abs;
+	int esize, lanes, i;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	if (!is_vector_op (&dst) || !is_vector_op (&src)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (esize < 8 || esize > 64 || (esize & (esize - 1)) ||
+		vector_size (&dst) != esize || vas_count (dst.vas) != lanes) {
+		return;
+	}
+	switch (insn->id) {
+	case ARM64_INS_SQABS:
+		abs = true;
+		break;
+	case ARM64_INS_SQNEG:
+		abs = false;
+		break;
+	default:
+		return;
+	}
+	maxs = (1ULL << (esize - 1)) - 1;
+	mins = 1ULL << (esize - 1);
+	lsb = mins;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_a, is_min, is_neg, folded;
+		r_strbuf_init (&lane_a);
+		r_strbuf_init (&is_min);
+		r_strbuf_init (&is_neg);
+		r_strbuf_init (&folded);
+		VECARG64_APPEND (&lane_a, 1, i, 0);
+		a = r_strbuf_get (&lane_a);
+		r_strbuf_appendf (&is_min, "0x%" PFMT64x ",%s,-,!", mins, a);
+		r_strbuf_appendf (&is_neg, "0x%" PFMT64x ",%s,&,!,!", lsb, a);
+		if (abs) {
+			// p_neg ? (0 - a) : a
+			r_strbuf_appendf (&folded, "%s,%s,0,-,*,%s,1,-,%s,*,+",
+				r_strbuf_get (&is_neg), a, r_strbuf_get (&is_neg), a);
+		} else {
+			r_strbuf_appendf (&folded, "%s,0,-", a);
+		}
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		r_strbuf_appendf (&op->esil, "%s,0x%" PFMT64x ",*,%s,1,-,%s,*,+,",
+			r_strbuf_get (&is_min), maxs, r_strbuf_get (&is_min), r_strbuf_get (&folded));
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_a);
+		r_strbuf_fini (&is_min);
+		r_strbuf_fini (&is_neg);
+		r_strbuf_fini (&folded);
+	}
+}
+
+// SUQADD/USQADD: in-place adds of the unsigned source lane and the signed
+// destination lane, clamped to the unsigned (USQADD) or signed (SUQADD)
+// element range; 64-bit lanes go through the operand magnitudes with
+// borrow/carry probes on the wrapped sum
+static void arm64_esil_vec_satmixed(RAnalOp *op, csh *handle, cs_insn *insn) {
+	cs_arm64_op dst, src;
+	const char *u, *s;
+	ut64 mask, maxs, mins, maxu, signbit;
+	bool unsat;
+	int esize, lanes, up, i;
+	if (OPCOUNT64 () != 2 || !ISREG64 (0) || !ISREG64 (1)) {
+		return;
+	}
+	dst = INSOP64 (0);
+	src = INSOP64 (1);
+	if (!is_vector_op (&dst) || !is_vector_op (&src)) {
+		return;
+	}
+	esize = vector_size (&src);
+	lanes = vas_count (src.vas);
+	if (esize < 8 || esize > 64 || (esize & (esize - 1)) ||
+		vector_size (&dst) != esize || vas_count (dst.vas) != lanes) {
+		return;
+	}
+	switch (insn->id) {
+	case ARM64_INS_SUQADD:
+		unsat = false;
+		break;
+	case ARM64_INS_USQADD:
+		unsat = true;
+		break;
+	default:
+		return;
+	}
+	mask = esize == 64? UT64_MAX: ((1ULL << esize) - 1);
+	maxs = (1ULL << (esize - 1)) - 1;
+	mins = 1ULL << (esize - 1);
+	maxu = mask;
+	signbit = 1ULL << 63;
+	up = 64 - esize;
+	for (i = 0; i < lanes; i++) {
+		RStrBuf lane_u, lane_s, over_pos, over_neg, sum;
+		r_strbuf_init (&lane_u);
+		r_strbuf_init (&lane_s);
+		r_strbuf_init (&over_pos);
+		r_strbuf_init (&over_neg);
+		r_strbuf_init (&sum);
+		VECARG64_APPEND (&lane_u, 1, i, 0);
+		VECARG64_APPEND (&lane_s, 0, i, 0);
+		u = r_strbuf_get (&lane_u);
+		s = r_strbuf_get (&lane_s);
+		if (esize < 64) {
+			RStrBuf sext_s;
+			r_strbuf_init (&sext_s);
+			r_strbuf_appendf (&sext_s, "%d,%d,%s,<<,ASR", up, up, s);
+			r_strbuf_appendf (&sum, "%s,%s,+", u, r_strbuf_get (&sext_s));
+			if (unsat) {
+				r_strbuf_appendf (&over_pos, "0x%" PFMT64x ",%s,>", maxu, r_strbuf_get (&sum));
+				r_strbuf_appendf (&over_neg, "%s,0,>", r_strbuf_get (&sum));
+			} else {
+				r_strbuf_appendf (&over_pos, "0x%" PFMT64x ",%s,>", maxs, r_strbuf_get (&sum));
+				r_strbuf_appendf (&over_neg, "%s,0x%" PFMT64x ",>", r_strbuf_get (&sum),
+					UT64_MAX << (esize - 1));
+			}
+			r_strbuf_fini (&sext_s);
+		} else {
+			RStrBuf s_neg, mag, borrow, carry, above;
+			r_strbuf_init (&s_neg);
+			r_strbuf_init (&mag);
+			r_strbuf_init (&borrow);
+			r_strbuf_init (&carry);
+			r_strbuf_init (&above);
+			r_strbuf_appendf (&s_neg, "0x%" PFMT64x ",%s,&,!,!", signbit, s);
+			// magnitude of the signed destination lane
+			r_strbuf_appendf (&mag, "%s,%s,0,-,*,%s,1,-,%s,*,+",
+				r_strbuf_get (&s_neg), s, r_strbuf_get (&s_neg), s);
+			// subtract when the signed lane is negative, add otherwise
+			r_strbuf_appendf (&sum, "%s,?{,%s,%s,-,}{,%s,%s,+,},",
+				r_strbuf_get (&s_neg), r_strbuf_get (&mag), u, u, r_strbuf_get (&mag));
+			// signed lane < 0 and |s| > u
+			r_strbuf_appendf (&borrow, "%s,%s,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,>,*",
+				r_strbuf_get (&s_neg), u, signbit, r_strbuf_get (&mag), signbit);
+			// signed lane >= 0 and u + |s| carries out of 64 bits
+			r_strbuf_appendf (&carry, "%s,1,-,%s,0x%" PFMT64x ",-,0x%" PFMT64x ",^,%s,0x%" PFMT64x ",^,>,*",
+				r_strbuf_get (&s_neg), u, maxu, signbit, r_strbuf_get (&mag), signbit);
+			// wrapped sum above the signed maximum as an unsigned compare
+			r_strbuf_appendf (&above, "0x%" PFMT64x ",%s,0x%" PFMT64x ",^,>",
+				UT64_MAX, r_strbuf_get (&sum), signbit);
+			if (unsat) {
+				r_strbuf_copy (&over_pos, &carry);
+				r_strbuf_copy (&over_neg, &borrow);
+			} else {
+				r_strbuf_appendf (&over_pos, "%s,%s,1,-,*,%s,*,%s,1,-,%s,%s,+,!,!,*,+",
+					r_strbuf_get (&s_neg), r_strbuf_get (&borrow), r_strbuf_get (&above),
+					r_strbuf_get (&s_neg), r_strbuf_get (&carry), r_strbuf_get (&above));
+				r_strbuf_set (&over_neg, "0");
+			}
+			r_strbuf_fini (&s_neg);
+			r_strbuf_fini (&mag);
+			r_strbuf_fini (&borrow);
+			r_strbuf_fini (&carry);
+			r_strbuf_fini (&above);
+		}
+		if (i > 0) {
+			COMMA (&op->esil);
+		}
+		if (unsat) {
+			r_strbuf_appendf (&op->esil,
+				"%s,0x%" PFMT64x ",*,%s,0x%" PFMT64x ",&,%s,1,-,%s,1,-,*,*,+,",
+				r_strbuf_get (&over_pos), maxu, r_strbuf_get (&sum), mask,
+				r_strbuf_get (&over_pos), r_strbuf_get (&over_neg));
+		} else {
+			r_strbuf_appendf (&op->esil,
+				"%s,0x%" PFMT64x ",*,%s,0x%" PFMT64x ",*,+,%s,0x%" PFMT64x ",&,%s,1,-,%s,1,-,*,*,+,",
+				r_strbuf_get (&over_pos), maxs, r_strbuf_get (&over_neg), mins,
+				r_strbuf_get (&sum), mask,
+				r_strbuf_get (&over_pos), r_strbuf_get (&over_neg));
+		}
+		VEC64_DST_APPEND (&op->esil, 0, i);
+		r_strbuf_append (&op->esil, ",=");
+		r_strbuf_fini (&lane_u);
+		r_strbuf_fini (&lane_s);
+		r_strbuf_fini (&over_pos);
+		r_strbuf_fini (&over_neg);
+		r_strbuf_fini (&sum);
+	}
+}
+
 // SADDLP/UADDLP/SADALP/UADALP: add adjacent narrow pairs into wide lanes,
 // accumulating into the destination in the ALP forms
 static void arm64_esil_vec_pwl(RAnalOp *op, csh *handle, cs_insn *insn) {
@@ -5291,6 +5758,28 @@ static int analop64_esil(RArchSession *as, RAnalOp *op, ut64 addr, const ut8 *bu
 	case ARM64_INS_SABD:
 	case ARM64_INS_UABD:
 		arm64_esil_vec_absdiff (op, handle, insn);
+		break;
+	case ARM64_INS_SHADD:
+	case ARM64_INS_UHADD:
+	case ARM64_INS_SRHADD:
+	case ARM64_INS_URHADD:
+	case ARM64_INS_SHSUB:
+	case ARM64_INS_UHSUB:
+		arm64_esil_vec_halving (op, handle, insn);
+		break;
+	case ARM64_INS_SQADD:
+	case ARM64_INS_UQADD:
+	case ARM64_INS_SQSUB:
+	case ARM64_INS_UQSUB:
+		arm64_esil_vec_satbin (op, handle, insn);
+		break;
+	case ARM64_INS_SQABS:
+	case ARM64_INS_SQNEG:
+		arm64_esil_vec_satunary (op, handle, insn);
+		break;
+	case ARM64_INS_SUQADD:
+	case ARM64_INS_USQADD:
+		arm64_esil_vec_satmixed (op, handle, insn);
 		break;
 	case ARM64_INS_SADDLP:
 	case ARM64_INS_UADDLP:
@@ -6799,11 +7288,25 @@ static void anop64(csh handle, RAnalOp *op, cs_insn *insn) {
 	case ARM64_INS_SADALP:
 	case ARM64_INS_UADALP:
 	case ARM64_INS_SABD:
+	case ARM64_INS_SHADD:
+	case ARM64_INS_SHSUB:
 	case ARM64_INS_SMAX:
 	case ARM64_INS_SMIN:
+	case ARM64_INS_SQABS:
+	case ARM64_INS_SQADD:
+	case ARM64_INS_SQNEG:
+	case ARM64_INS_SQSUB:
+	case ARM64_INS_SRHADD:
+	case ARM64_INS_SUQADD:
 	case ARM64_INS_UABD:
+	case ARM64_INS_UHADD:
+	case ARM64_INS_UHSUB:
 	case ARM64_INS_UMAX:
 	case ARM64_INS_UMIN:
+	case ARM64_INS_UQADD:
+	case ARM64_INS_UQSUB:
+	case ARM64_INS_URHADD:
+	case ARM64_INS_USQADD:
 	case ARM64_INS_MOVK:
 	case ARM64_INS_MOVN:
 	case ARM64_INS_SMOV:
