@@ -57402,3 +57402,52 @@ EXPECT=<<EOF
 0x00000020    1      8 fcn.00000020
 EOF
 RUN
+
+NAME=arm64 SIMD FP vector instruction op types after the esil work
+FILE=malloc://0x200
+ARGS=-a arm -b 64
+REQUIRE=cs5
+CMDS=<<EOF
+wx 20f8a00e20c4220e20c4222e20f4a20e2088210e2058606e2000c05a2054212f20443f2f204ca20e2064212f205ca22e20043f0f20043f2f2044a20e20c0624e20c0626e20b8b14ee003212a @ 0
+ao 1 @ 0~type[1] # fabs v0.2s
+ao 1 @ 4~type[1] # fmaxnm
+ao 1 @ 8~type[1] # fmaxnmp
+ao 1 @ 12~type[1] # fmin
+ao 1 @ 16~type[1] # frintn
+ao 1 @ 20~type[1] # rbit v
+ao 1 @ 24~type[1] # rbit w
+ao 1 @ 28~type[1] # sli
+ao 1 @ 32~type[1] # sri
+ao 1 @ 36~type[1] # sqshl
+ao 1 @ 40~type[1] # sqshlu
+ao 1 @ 44~type[1] # uqrshl
+ao 1 @ 48~type[1] # sshr
+ao 1 @ 52~type[1] # ushr
+ao 1 @ 56~type[1] # sshl
+ao 1 @ 60~type[1] # smull2
+ao 1 @ 64~type[1] # umull2
+ao 1 @ 68~type[1] # addv
+ao 1 @ 72~type[1] # mvn w
+EOF
+EXPECT=<<EOF
+mov
+mov
+mov
+mov
+cast
+mov
+mov
+shl
+shr
+shl
+shl
+shl
+shr
+shr
+shl
+mul
+mul
+mov
+not
+EOF
+RUN
